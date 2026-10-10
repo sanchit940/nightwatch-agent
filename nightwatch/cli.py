@@ -149,6 +149,17 @@ def cmd_watch(a, s: Settings) -> int:
     return 0
 
 
+def cmd_check(a, s: Settings) -> int:
+    """One round of the watch checks. Deterministic; no model call; no API key needed."""
+    from .watch import group, load_checks, scan
+    findings = scan(load_checks())
+    if not findings:
+        console.print("[green]healthy: all watch checks passed[/]")
+        return 0
+    console.print(Panel(group(findings)[0].symptom, title="Findings (an incident opens after 2 failed rounds in watch mode)", border_style="red"))
+    return 1
+
+
 def cmd_approvals(a, s: Settings) -> int:
     audit, _ = build(s)
     t = Table("id", "incident", "action", "params", "status", "expires")
@@ -213,6 +224,7 @@ def main(argv: list[str] | None = None) -> int:
     w.add_argument("--confirm", type=int, default=2, help="consecutive failed rounds before an incident opens")
     w.add_argument("--approval", default="wait", choices=["wait", "policy-only"])
     w.add_argument("--once", action="store_true")
+    sub.add_parser("check", help="run the watch checks once; no model call")
     ap = sub.add_parser("approvals")
     ap.add_argument("--all", action="store_true")
     for name in ("approve", "reject"):
@@ -233,6 +245,7 @@ def main(argv: list[str] | None = None) -> int:
     return {
         "investigate": lambda: cmd_investigate(a, s),
         "watch": lambda: cmd_watch(a, s),
+        "check": lambda: cmd_check(a, s),
         "approvals": lambda: cmd_approvals(a, s),
         "approve": lambda: cmd_approve(a, s, True),
         "reject": lambda: cmd_approve(a, s, False),
