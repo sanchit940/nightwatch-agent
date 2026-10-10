@@ -87,6 +87,35 @@ nightwatch audit --verify                                            # check the
 bash lab/reset_all.sh
 ```
 
+## Slack approvals
+
+NightWatch posts each incident to Slack as one thread, in the channel of its severity (`policy.yaml` → `severity`, `slack`).
+
+| Severity | Definition (owned by humans) | Approval time limit |
+|---|---|---|
+| P0 | Public entry point down, all requests fail, or data can be lost now | 15 min |
+| P1 | Users affected: some requests fail, high latency, critical dependency degraded | 30 min |
+| P2 | No user impact now: one component unhealthy, redundancy lost, a limit near | 60 min |
+
+The plan message is written in ASD-STE100 short sentences: *What I checked*, *What I found*, *Cause*, *Symptoms, not causes*,
+*Plan* (action, effect, why, risk, rollback), *After the change, I will verify*, *Not known*. Buttons:
+
+- **Approve**: the approval is bound to the exact action, target state and expiry. NightWatch executes, verifies, and posts the result in the thread.
+- **Reject**: nothing changes.
+- **Suggest another fix**: write an instruction. NightWatch tests it, posts a new plan (it needs approval again), or verifies a manual fix.
+- **Give instructions** appears when no allowed action can fix the problem.
+
+Only the approvers listed for that severity can decide. Setup:
+
+1. https://api.slack.com/apps → *Create New App* → *From a manifest* → paste [`slack/manifest.yaml`](slack/manifest.yaml).
+2. *Install to Workspace* → copy the **Bot User OAuth Token** (`xoxb-…`) to `SLACK_BOT_TOKEN` in `.env`.
+3. *Basic Information* → *App-Level Tokens* → create one with scope `connections:write` → copy `xapp-…` to `SLACK_APP_TOKEN`.
+4. Create the channels in `policy.yaml` (`#nightwatch-p0`, `#nightwatch-alerts`) and set `slack.approvers` (Slack user IDs).
+5. `nightwatch slack-test --severity P0`, then `nightwatch watch --approval slack`.
+
+Without tokens, `--approval slack` is a dry run: messages go to `runs/slack-outbox.jsonl`, and you decide with
+`nightwatch approve <id>`, `nightwatch reject <id>` or `nightwatch guide <incident> "instruction"`.
+
 ## Evaluation
 
 [`evals/run_evals.py`](evals/run_evals.py) runs known incidents from [`evals/scenarios.yaml`](evals/scenarios.yaml):

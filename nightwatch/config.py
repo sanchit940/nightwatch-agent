@@ -37,6 +37,8 @@ class Settings:
     prompt_version: str = "v2"
     llm_base_url: str = ""      # e.g. the neatHack LiteLLM proxy; empty = api.anthropic.com
     llm_api_key: str = ""
+    slack_bot_token: str = ""   # xoxb-...  (empty = dry run: messages go to runs/slack-outbox.jsonl)
+    slack_app_token: str = ""   # xapp-...  (Socket Mode, for buttons and the instruction form)
     tags: list[str] = field(default_factory=list)
 
     @classmethod
@@ -52,6 +54,8 @@ class Settings:
         # Own variable names: a parent process (for example Claude Code) can set ANTHROPIC_BASE_URL.
         s.llm_base_url = os.environ.get("NIGHTWATCH_LLM_BASE_URL", "")
         s.llm_api_key = os.environ.get("LITELLM_API_KEY") or os.environ.get("ANTHROPIC_API_KEY", "")
+        s.slack_bot_token = os.environ.get("SLACK_BOT_TOKEN", "")
+        s.slack_app_token = os.environ.get("SLACK_APP_TOKEN", "")
         if db := os.environ.get("NIGHTWATCH_AUDIT_DB"):
             s.audit_db = Path(db)
         s.audit_db.parent.mkdir(parents=True, exist_ok=True)

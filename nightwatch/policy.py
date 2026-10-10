@@ -133,9 +133,11 @@ class Policy:
             self.audit.log("policy_denied", {"action": action_name, "params": params, "cause": cause, "reason": why}, incident_id)
             return Decision(False, "INCOMPATIBLE_FIX", why)
         now = time.time()
+        sev = (justification or {}).get("severity")
+        ttl = float(((self.cfg.get("severity") or {}).get(sev) or {}).get("approval_ttl_seconds", self.ttl))
         rec = {"id": "apr-" + uuid.uuid4().hex[:8], "incident_id": incident_id, "action": action_name,
                "params": p.model_dump(mode="json"), "targets": targets, "fingerprint": act.fingerprint(p),
-               "justification": justification, "created_at": now, "expires_at": now + self.ttl, "status": "pending"}
+               "justification": justification, "created_at": now, "expires_at": now + ttl, "status": "pending"}
         rec["digest"] = self._digest(rec)
         self.audit.insert_approval(rec)
         self.audit.log("action_proposed", {k: rec[k] for k in ("id", "action", "params", "targets", "fingerprint", "justification", "expires_at", "digest")}, incident_id)
@@ -212,3 +214,12 @@ class Policy:
             self.audit.update_approval(aid, status="stale")
             return deny("STALE_STATE", f"target changed since approval: approved state '{rec['fingerprint']}', current '{current}'")
         return Decision(True, "AUTHORIZED", "", p)
+
+    # ---------- people ----------
+    def can_decide(self, user_id: str, severity: str | None) -> bool:
+        """True when this Slack user may approve, reject or instruct for an incident of this severity."""
+        approvers = (((self.cfg.get("slack") or {}).get("approvers") or {}).get(severity or "P1")) or []
+        return not approvers or user_id in approvers
+
+    def severity_definitions(self) -> dict[str, str]:
+        return {k: v.get("definition", "") for k, v in (self.cfg.get("severity") or {}).items()}

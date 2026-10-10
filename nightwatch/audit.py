@@ -51,6 +51,21 @@ CREATE TABLE IF NOT EXISTS approvals (
   executed_at REAL,
   result TEXT
 );
+CREATE TABLE IF NOT EXISTS guidance (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts REAL NOT NULL,
+  incident_id TEXT NOT NULL,
+  approval_id TEXT,
+  user TEXT NOT NULL,
+  text TEXT NOT NULL,
+  consumed INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS meta (
+  incident_id TEXT NOT NULL,
+  key TEXT NOT NULL,
+  value TEXT NOT NULL,
+  PRIMARY KEY (incident_id, key)
+);
 """
 
 
@@ -62,21 +77,31 @@ class Audit:
     def __init__(self, path: Path | str):
         self.path = str(path)
         self._lock = threading.Lock()
-        self.db = sqlite3.connect(self.path, check_same_thread=False, isolation_level=None)
+        self.db = sqlite3.connect(self.path, check_same_thread=False, isolation_level=None, timeout=15)
         self.db.row_factory = sqlite3.Row
+        if self.path != ":memory:":
+            # Several processes (watch loop, Slack app, CLI approvals) share one audit file.
+            self.db.execute("PRAGMA journal_mode=WAL")
         self.db.executescript(SCHEMA)
 
     # ----- hash-chained event log -----
     def log(self, kind: str, payload: dict[str, Any], incident_id: str | None = None) -> int:
         with self._lock:
-            row = self.db.execute("SELECT hash FROM events ORDER BY seq DESC LIMIT 1").fetchone()
-            prev = row["hash"] if row else "genesis"
-            ts = time.time()
-            body = _canon(payload)
-            h = hashlib.sha256(f"{prev}|{ts}|{incident_id}|{kind}|{body}".encode()).hexdigest()
-            cur = self.db.execute(
-                "INSERT INTO events(ts, incident_id, kind, payload, prev_hash, hash) VALUES (?,?,?,?,?,?)",
-                (ts, incident_id, kind, body, prev, h))
+            # BEGIN IMMEDIATE takes the write lock before reading the last hash, so two processes cannot fork the chain.
+            self.db.execute("BEGIN IMMEDIATE")
+            try:
+                row = self.db.execute("SELECT hash FROM events ORDER BY seq DESC LIMIT 1").fetchone()
+                prev = row["hash"] if row else "genesis"
+                ts = time.time()
+                body = _canon(payload)
+                h = hashlib.sha256(f"{prev}|{ts}|{incident_id}|{kind}|{body}".encode()).hexdigest()
+                cur = self.db.execute(
+                    "INSERT INTO events(ts, incident_id, kind, payload, prev_hash, hash) VALUES (?,?,?,?,?,?)",
+                    (ts, incident_id, kind, body, prev, h))
+                self.db.execute("COMMIT")
+            except Exception:
+                self.db.execute("ROLLBACK")
+                raise
             return cur.lastrowid
 
     def events(self, incident_id: str | None = None) -> list[dict]:
@@ -154,3 +179,25 @@ class Audit:
     def count_executed(self, action: str, target: str, since: float) -> int:
         rows = self.db.execute("SELECT targets FROM approvals WHERE action=? AND executed_at>=?", (action, since)).fetchall()
         return sum(1 for r in rows if target in json.loads(r["targets"]))
+
+    # ----- approver guidance (an instruction from a human instead of the proposed fix) -----
+    def add_guidance(self, incident_id: str, user: str, text: str, approval_id: str | None = None) -> int:
+        cur = self.db.execute("INSERT INTO guidance(ts, incident_id, approval_id, user, text) VALUES (?,?,?,?,?)",
+                              (time.time(), incident_id, approval_id, user, text))
+        self.log("approver_guidance", {"approval_id": approval_id, "user": user, "text": text}, incident_id)
+        return cur.lastrowid
+
+    def pending_guidance(self, incident_id: str) -> list[dict]:
+        return [dict(r) for r in self.db.execute(
+            "SELECT * FROM guidance WHERE incident_id=? AND consumed=0 ORDER BY id", (incident_id,))]
+
+    def consume_guidance(self, gid: int) -> None:
+        self.db.execute("UPDATE guidance SET consumed=1 WHERE id=?", (gid,))
+
+    # ----- small per-incident key/value store (for example the Slack thread of an incident) -----
+    def set_meta(self, incident_id: str, key: str, value: Any) -> None:
+        self.db.execute("INSERT OR REPLACE INTO meta(incident_id, key, value) VALUES (?,?,?)", (incident_id, key, _canon(value)))
+
+    def get_meta(self, incident_id: str, key: str, default: Any = None) -> Any:
+        r = self.db.execute("SELECT value FROM meta WHERE incident_id=? AND key=?", (incident_id, key)).fetchone()
+        return json.loads(r["value"]) if r else default

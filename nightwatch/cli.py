@@ -95,6 +95,28 @@ def interactive_prompt(rec: dict) -> bool:
     return console.input("[bold yellow]Approve this exact change? [y/N] [/]").strip().lower() in ("y", "yes")
 
 
+def build_slack(s: Settings, audit: Audit, policy: Policy):
+    """Notifier (real or dry run) and, with an app token, the Socket Mode listener for buttons."""
+    from .notify.slack import SlackNotifier
+    cfg = policy.cfg.get("slack") or {}
+    if not s.approval_secret:
+        raise SystemExit("Set NIGHTWATCH_APPROVAL_SECRET: the Slack app and the runner must sign approvals with the same secret.")
+    if not s.slack_bot_token:
+        console.print("[yellow]SLACK_BOT_TOKEN is not set: Slack dry run. Messages go to runs/slack-outbox.jsonl. "
+                      "Decide with: nightwatch approve|reject <id>, nightwatch guide <incident> \"text\".[/]")
+        return SlackNotifier(cfg, audit, client=None, console=console), None
+    from slack_sdk import WebClient
+    notifier = SlackNotifier(cfg, audit, client=WebClient(token=s.slack_bot_token))
+    handler = None
+    if s.slack_app_token:
+        from .notify import slack_app
+        handler = slack_app.start(s.slack_bot_token, s.slack_app_token, s.audit_db, s.policy_file, s.approval_secret, cfg)
+        console.print("[green]Slack app connected (Socket Mode): buttons are live.[/]")
+    else:
+        console.print("[yellow]SLACK_APP_TOKEN is not set: messages are posted, but buttons do not work. Use the CLI to decide.[/]")
+    return notifier, handler
+
+
 def build(s: Settings):
     audit = Audit(s.audit_db)
     policy = Policy(s.policy_file, audit, s.approval_secret)
@@ -105,14 +127,18 @@ def cmd_investigate(a, s: Settings) -> int:
     from .incident import IncidentRunner, make_approver
     audit, policy = build(s)
     init_tracing(s, "nightwatch-investigate")
-    approver = make_approver(a.approval, interactive_prompt)
-    wait = {"interactive": 900, "wait": 900}.get(a.approval, 0)
+    notifier = None
+    if a.approval == "slack":
+        notifier, _ = build_slack(s, audit, policy)
+    approver = make_approver("wait" if a.approval == "slack" else a.approval, interactive_prompt)
+    wait = {"interactive": 900, "wait": 900, "slack": 3600}.get(a.approval, 0)
     runner = IncidentRunner(s, audit, policy, approver, render_event, approval_wait_s=wait,
-                            approver_name="human:cli" if a.approval == "interactive" else a.approval)
+                            approver_name="human:cli" if a.approval == "interactive" else a.approval,
+                            notifier=notifier, guidance_wait_s=1800 if a.approval == "slack" else 0)
     from .config import llm_spend
     spend0 = llm_spend(s)
     try:
-        out = runner.handle(a.symptom, source="human")
+        out = runner.handle(a.symptom, source="human", max_rounds=5 if a.approval == "slack" else 3)
     finally:
         shutdown_tracing(s)
     spend1 = llm_spend(s)
@@ -130,14 +156,18 @@ def cmd_watch(a, s: Settings) -> int:
     from .watch import Finding, run_watch
     audit, policy = build(s)
     init_tracing(s, "nightwatch-watch")
-    runner = IncidentRunner(s, audit, policy, make_approver(a.approval), render_event,
-                            approval_wait_s=900 if a.approval == "wait" else 0, approver_name=a.approval)
+    notifier = None
+    if a.approval == "slack":
+        notifier, _ = build_slack(s, audit, policy)
+    runner = IncidentRunner(s, audit, policy, make_approver("wait" if a.approval == "slack" else a.approval), render_event,
+                            approval_wait_s={"wait": 900, "slack": 3600}.get(a.approval, 0), approver_name=a.approval,
+                            notifier=notifier, guidance_wait_s=1800 if a.approval == "slack" else 0)
 
     def handle(f: Finding) -> None:
         if audit.find_open_incident(f.key):
             console.print(f"[dim]already handling {f.key}; no new alert[/]")
             return
-        out = runner.handle(f.symptom, source="watch", dedup_key=f.key)
+        out = runner.handle(f.symptom, source="watch", dedup_key=f.key, max_rounds=5 if a.approval == "slack" else 3)
         console.print(f"[bold]{out.incident_id}[/] -> {out.status}")
 
     def tick(findings) -> None:
@@ -187,6 +217,50 @@ def cmd_approve(a, s: Settings, approve: bool) -> int:
     return 0 if d.allowed else 1
 
 
+def cmd_guide(a, s: Settings) -> int:
+    """Give the agent an instruction instead of (or after) its plan. Same path as the Slack form."""
+    audit, policy = build(s)
+    if not audit.incident(a.incident):
+        console.print(f"[red]no incident {a.incident}[/]")
+        return 1
+    pending = [r for r in audit.approvals(status="pending", incident_id=a.incident)]
+    aid = a.approval or (pending[-1]["id"] if pending else None)
+    audit.add_guidance(a.incident, f"human:{a.by}", a.text, aid)
+    if aid and (audit.approval(aid) or {}).get("status") == "pending":
+        policy.reject(aid, f"human:{a.by}", "replaced by an approver instruction")
+    console.print(f"instruction stored for {a.incident}" + (f"; approval {aid} replaced (not executed)" if aid else ""))
+    return 0
+
+
+def cmd_slack_test(a, s: Settings) -> int:
+    """Send (or preview) a sample plan message, to check tokens, channels and the layout."""
+    import tempfile
+    from .notify.slack import SlackNotifier
+    audit = Audit(tempfile.mktemp(suffix=".db"))
+    policy = Policy(s.policy_file, audit, s.approval_secret or "test")
+    iid = audit.open_incident("Sample: users get 503 errors on http://localhost:8080", "slack-test")
+    audit.log("tool_call", {"tool": "net_http_check", "args": {"url": "http://localhost:8080/", "source": "agent"}, "ok": False, "error_code": "HTTP_503"}, iid)
+    audit.log("tool_call", {"tool": "docker_inspect", "args": {"container": "nw-redis"}, "ok": True}, iid)
+    report = {"summary": "This is a TEST message. Redis is stopped. The API returns 503.",
+              "severity": {"level": a.severity, "reason": "All requests fail (test)."},
+              "problem_statement": {"symptom": "HTTP 503 on every request.", "affected_service": "shop web and API", "start_time": "now"},
+              "evidence": [{"tool": "docker_inspect", "finding": "nw-redis is exited with code 0."}],
+              "root_cause": {"category": "dependency_down", "resource": "nw-redis", "description": "Redis stopped. The API cannot reach it.",
+                             "confidence": "high", "symptoms_not_causes": ["HTTP 503 on the web entry point."]},
+              "known_unknowns": ["Who stopped Redis."], "recommendations": []}
+    rec = {"id": "apr-test0000", "action": "start_container", "params": {"container": "nw-redis"}, "fingerprint": "test",
+           "expires_at": time.time() + 900, "justification": {"severity": a.severity, "expected_effect": "removes_root_cause",
+           "reason": "Redis is stopped.", "risk": "Low. Same image and config.", "rollback": "docker stop nw-redis.",
+           "verification": [{"tool": "net_http_check", "args": {"url": "http://localhost:8080/"}, "expect": {"ok": True}}]}}
+    client = None
+    if s.slack_bot_token:
+        from slack_sdk import WebClient
+        client = WebClient(token=s.slack_bot_token)
+    SlackNotifier(policy.cfg.get("slack") or {}, audit, client=client, console=console).post_plan(iid, report, rec)
+    console.print("[green]sent[/]" if client else "[yellow]dry run (no SLACK_BOT_TOKEN)[/]")
+    return 0
+
+
 def cmd_audit(a, s: Settings) -> int:
     audit, _ = build(s)
     if a.verify:
@@ -223,11 +297,11 @@ def main(argv: list[str] | None = None) -> int:
     sub = p.add_subparsers(dest="cmd", required=True)
     i = sub.add_parser("investigate")
     i.add_argument("symptom")
-    i.add_argument("--approval", default="interactive", choices=["interactive", "wait", "policy-only", "deny-all"])
+    i.add_argument("--approval", default="interactive", choices=["interactive", "wait", "slack", "policy-only", "deny-all"])
     w = sub.add_parser("watch")
     w.add_argument("--interval", type=float, default=20)
     w.add_argument("--confirm", type=int, default=2, help="consecutive failed rounds before an incident opens")
-    w.add_argument("--approval", default="wait", choices=["wait", "policy-only"])
+    w.add_argument("--approval", default="wait", choices=["wait", "slack", "policy-only"])
     w.add_argument("--once", action="store_true")
     sub.add_parser("check", help="run the watch checks once; no model call")
     ap = sub.add_parser("approvals")
@@ -237,6 +311,13 @@ def main(argv: list[str] | None = None) -> int:
         x.add_argument("id")
         x.add_argument("--by", default="oncall")
         x.add_argument("--reason")
+    gd = sub.add_parser("guide", help="give the agent an instruction for an incident (replaces a pending plan)")
+    gd.add_argument("incident")
+    gd.add_argument("text")
+    gd.add_argument("--approval", help="approval id to replace (default: the latest pending one)")
+    gd.add_argument("--by", default="oncall")
+    st = sub.add_parser("slack-test", help="send or preview a sample Slack plan message")
+    st.add_argument("--severity", default="P1", choices=["P0", "P1", "P2"])
     au = sub.add_parser("audit")
     au.add_argument("--incident")
     au.add_argument("--verify", action="store_true")
@@ -255,6 +336,8 @@ def main(argv: list[str] | None = None) -> int:
         "approve": lambda: cmd_approve(a, s, True),
         "reject": lambda: cmd_approve(a, s, False),
         "audit": lambda: cmd_audit(a, s),
+        "guide": lambda: cmd_guide(a, s),
+        "slack-test": lambda: cmd_slack_test(a, s),
         "tools": lambda: cmd_tools(a, s),
     }[a.cmd]()
 

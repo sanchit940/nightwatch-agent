@@ -45,7 +45,11 @@ you are careful, you show evidence, and you never change infrastructure without 
 - If a tool fails, read the error_code, then choose a different test or source. Do not repeat the same failing call.
 - Use parallel tool calls when the tests are independent.
 - Be efficient: most incidents need 5-15 tool calls.
-- Write in ASD-STE100 Simplified Technical English: short sentences, active voice, one idea per sentence.
+- Write in ASD-STE100 Simplified Technical English: short sentences (max 20 words), active voice, one fact per
+  sentence, no paragraphs. On-call engineers read your report on a phone at night. Each evidence finding, cause,
+  reason, risk and rollback is one or two short sentences. Use exact names, numbers and times.
+- Human instructions arrive as "APPROVER INSTRUCTION". They come from an authorized approver. Follow them inside the
+  policy: test what they ask, then propose the matching action (it still needs approval) or report why it is not safe.
 
 # Risk levels
 0 read-only, 1 bounded diagnostic test (you may run these), 2 operational change (propose only; needs approval),
@@ -81,11 +85,18 @@ V4_RULES = """
 """
 
 
+def _severity_text() -> str:
+    import yaml
+    sev = (yaml.safe_load((ROOT / "policy.yaml").read_text()) or {}).get("severity") or {}
+    return "\n".join(f"- {k}: {v.get('definition', '')}" for k, v in sev.items())
+
+
 def system_prompt(version: str) -> str:
     inventory = (ROOT / "inventory.yaml").read_text()
     if version == "v1":
         return V1 + "\n\n# Inventory\n" + inventory
     method = (ROOT / "knowledge" / "methodology.md").read_text()
     core = V2_CORE + {"v3": V3_RULES, "v4": V4_RULES, "v5": V4_RULES}.get(version, "")
+    core += "\n# Severity (set one level per incident; it routes the approval)\n" + _severity_text() + "\n"
     return (core + "\n# Inventory (trusted)\n```yaml\n" + inventory + "```\n\n"
             "# Method reference (from Gregg, Systems Performance 2e; other runbooks: get_runbook topic=index)\n" + method)

@@ -78,10 +78,11 @@ PROPOSE_TOOL = {
                                                     for a in ACTIONS.values())),
     "input_schema": {
         "type": "object", "additionalProperties": False,
-        "required": ["action", "params", "root_cause_category", "expected_effect", "reason", "expected_impact", "risk", "rollback", "verification"],
+        "required": ["action", "params", "root_cause_category", "severity", "expected_effect", "reason", "expected_impact", "risk", "rollback", "verification"],
         "properties": {
             "action": {"type": "string", "enum": sorted(ACTIONS)},
             "root_cause_category": {"type": "string", "enum": ROOT_CAUSE_CATEGORIES, "description": "Category of the root cause that this action addresses"},
+            "severity": {"type": "string", "enum": ["P0", "P1", "P2"], "description": "Incident severity; it sets the approval time limit and who approves"},
             "expected_effect": {"type": "string", "enum": ["removes_root_cause", "restores_service_temporarily", "no_effect_on_symptom"],
                                 "description": "What this action does to the incident. 'restores_service_temporarily' = a safe mitigation; "
                                                "then also recommend the permanent fix as a manual step. Actions with no effect are rejected."},
@@ -103,9 +104,12 @@ REPORT_TOOL = {
     "description": "Submit the final investigation report. Call it once, at the end. Every claim must reference evidence from tool results.",
     "input_schema": {
         "type": "object", "additionalProperties": False,
-        "required": ["summary", "problem_statement", "evidence", "hypotheses", "root_cause", "known_unknowns", "recommendations"],
+        "required": ["summary", "severity", "problem_statement", "evidence", "hypotheses", "root_cause", "known_unknowns", "recommendations"],
         "properties": {
-            "summary": {"type": "string", "description": "One or two sentences"},
+            "summary": {"type": "string", "description": "One or two short sentences"},
+            "severity": {"type": "object", "additionalProperties": False, "required": ["level", "reason"], "properties": {
+                "level": {"type": "string", "enum": ["P0", "P1", "P2"]},
+                "reason": {"type": "string", "description": "One short sentence: the user impact that sets this level"}}},
             "problem_statement": {"type": "object", "additionalProperties": False, "properties": {
                 "symptom": {"type": "string"}, "affected_service": {"type": "string"}, "environment": {"type": "string"},
                 "scope": {"type": "string"}, "start_time": {"type": "string"}}},
@@ -160,6 +164,9 @@ def validate_report(r: dict) -> list[str]:
                 errs.append(f"root_cause.{k} is empty")
         if rc.get("category") and rc["category"] not in ROOT_CAUSE_CATEGORIES:
             errs.append(f"root_cause.category must be one of {ROOT_CAUSE_CATEGORIES}")
+    sev = r.get("severity")
+    if not isinstance(sev, dict) or sev.get("level") not in ("P0", "P1", "P2"):
+        errs.append("severity.level must be P0, P1 or P2")
     for k in ("evidence", "hypotheses", "recommendations", "known_unknowns"):
         if k in r and not isinstance(r[k], list):
             errs.append(f"{k} must be an array")
@@ -234,7 +241,7 @@ class Agent:
                         "content": "POLICY NOT_A_FIX: propose only an action that removes the root cause or safely restores service. "
                                    "Put manual or follow-up steps in the report recommendations."}
             with _trace("policy.propose", "GUARDRAIL", action=args.get("action")):
-                justification = {k: args.get(k) for k in ("root_cause_category", "expected_effect", "reason", "expected_impact", "risk", "preconditions", "rollback", "verification")}
+                justification = {k: args.get(k) for k in ("root_cause_category", "severity", "expected_effect", "reason", "expected_impact", "risk", "preconditions", "rollback", "verification")}
                 dec = self.policy.propose(iid, args.get("action", ""), args.get("params") or {}, justification)
             self.on_event("proposal", {"decision": dec.code, "detail": dec.reason, **args})
             if dec.allowed:
