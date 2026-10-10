@@ -165,3 +165,30 @@
 - [ ] Demo video. Length and format: not announced.
 - [ ] Building-in-public posts with #neatHack.
 - [ ] Rules on pre-hackathon work, team size, conduct: not visible on the page — check with the organizers.
+
+### 2026-10-10 (evening) — Slack approvals
+
+**Builder request:** connect NightWatch to Slack. Route approvals by P0/P1/P2. Post a plan in ASD-STE100 short sentences. Let the approver approve, reject or give another instruction. Check and post the result.
+
+**Completed**
+- `policy.yaml` (human-owned): severity definitions, approval time limit per severity (P0 15 min, P1 30 min, P2 60 min), Slack channel, mention and approver list per severity.
+- The agent assigns a severity in every report and every proposal (schema-validated).
+- `nightwatch/notify/slack.py`: one Slack thread per incident in the channel of its severity. The plan message has: what I checked (built from the audit log, not from model text), what I found, cause, symptoms not causes, plan (action, effect, why, risk, rollback), verification, not known. Buttons: Approve (with a confirm dialog), Reject, Suggest another fix. "Give instructions" when no allowed action can fix the problem.
+- `nightwatch/notify/slack_app.py`: Socket Mode app (no public URL). Each click is checked against the approver list of that severity.
+- An approver instruction replaces the pending plan (never executed). The agent receives it as `APPROVER INSTRUCTION`, tests it, and proposes a new plan that needs approval again, or verifies a manual fix.
+- After execution: verification result and final status (RESOLVED / PARTLY RESOLVED / NOT RESOLVED) in the thread.
+- Dry run without Slack tokens (`runs/slack-outbox.jsonl`); `nightwatch guide <incident> "text"` and `nightwatch slack-test`.
+- Audit store made safe for several processes (WAL, `BEGIN IMMEDIATE` for the hash chain).
+- Tests that ran: 23 passed, including an offline end-to-end Slack flow (P0 routing, one thread, replaced plan never runs, approved plan runs, RESOLVED posted).
+
+**Live dry-run test** (redis-down, `claude-haiku`): plan → instruction ("read the Redis logs first, then start it") → new plan → approve → execute → verified → RESOLVED, all in one P0 thread. Cost $0.13.
+
+**Failures found and fixed in the live test**
+- Haiku again wrote a regex in a literal `contains` check. The verification engine now accepts regex-like text as a regex.
+- The Slack message lost one of three check results (text parsing). Verification now returns structured check results.
+- Thread replies repeated all steps. They now show only new steps.
+- Decisions from the CLI did not appear in Slack. The runner now announces every decision, whatever its source.
+- The agent verified a fix only with "container list contains nw-redis". New deterministic rule: if the symptom names a URL, the verification must repeat that request (`VERIFICATION_MISSES_SYMPTOM`).
+
+**Outstanding**
+- Builder: create the Slack app from `slack/manifest.yaml`, add tokens, create channels, set approver IDs.
