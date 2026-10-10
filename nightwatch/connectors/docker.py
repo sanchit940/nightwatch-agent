@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from typing import Annotated
 
 from pydantic import Field
@@ -159,7 +160,8 @@ def docker_events(a: EventsArgs) -> ToolOutput:
             extra = f" container={attrs.get('container', '')[:12]}"
         if "exitCode" in attrs:
             extra += f" exitCode={attrs['exitCode']}"
-        out.append(f"{e.get('time')}\t{e.get('Type')}\t{act}\t{who}{extra}")
+        ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(int(e.get("time", 0))))
+        out.append(f"{ts}\t{e.get('Type')}\t{act}\t{who}{extra}")
     # Collapse repeated identical events (e.g. health checks) to keep output small.
     compact, last, count = [], None, 0
     for row in out:

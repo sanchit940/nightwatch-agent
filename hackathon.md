@@ -35,11 +35,28 @@
 - Installed Entire CLI 0.11.4 and GitHub CLI 2.102.0 with Homebrew.
 - Ran `entire enable -y --agent claude-code`. Entire installed 9 Claude Code hooks and created `.entire/settings.json`.
 
+- Distilled *Systems Performance* 2e into 4 runbooks in `knowledge/` (methodology, USE checklist for Linux, resource runbooks, containers/cloud). All text is paraphrased. Each rule cites a book section (for example "SP §2.5.9"). Lines that are general ops practice, not from the book, have the tag `[ops]`.
+- Built the agent core (commit `091cd35`):
+  - 25 typed tools in 5 connectors: Linux (USE checks inside a container or node, cgroup throttling and OOM counters), Docker, Kubernetes, network (DNS → TCP → TLS → HTTP path trace from a chosen source), Prometheus, runbooks.
+  - 8 actions: 6 allowed (restart/start container, connect network, rollout undo/restart, scale), 2 destructive actions registered only to prove that risk level 3 is blocked.
+  - Policy service (`nightwatch/policy.py`, `policy.yaml`): schema validation, risk levels, target scope, tool-call and time budgets. Approvals are HMAC-signed and bound to action, parameters, target state fingerprint and expiry.
+  - Restricted action worker and verification engine (`nightwatch/worker.py`).
+  - Hash-chained SQLite audit log (`nightwatch/audit.py`).
+  - Orchestrator (`nightwatch/agent.py`): manual tool loop on `claude-opus-4-8`, adaptive thinking, prompt caching, parallel read-only tool calls, structured report tool.
+  - Watch mode (`nightwatch/watch.py`): deterministic checks, no model calls while healthy, incident deduplication.
+  - neatlogs instrumentation: `neatlogs.wrap(Anthropic())`, spans for each tool (`TOOL`), each policy decision (`GUARDRAIL`), the investigation (`AGENT`) and verification.
+- Tests that ran: `pytest tests` → 15 passed. They cover: invalid and unknown tools rejected, out-of-scope targets rejected, budget limit, risk 3 blocked, unapproved action never executes, replay rejected, modified approval rejected, forged token rejected, expired approval rejected, stale target state rejected, audit-chain tampering detected, standing auto-approval rule bounded by target and rate, secret redaction.
+- Smoke test of the read-only connectors against the running Docker lab: path trace, DNS from a container (busybox fallback), cgroup check, Prometheus query and Docker events returned real data.
+- Entire: checkpoint `01M4JKFNN0P3KJYXDZMS5NWFJE` is linked to commit `091cd35` (`entire checkpoint list`).
+
+**Fixes**
+- `linux_check` reported `ok=True` when the target container was restarting. Fix: treat any Docker daemon error as `TARGET_UNAVAILABLE`.
+- `docker_events` printed Unix seconds. Fix: print ISO-8601 UTC, so the agent can correlate events with metrics and logs.
+
 **Planned**
-- Distill the *Systems Performance* book into short runbooks for the agent prompt.
-- Build the core: policy service, audit store, connectors, orchestrator, verification engine.
-- Build the Docker Compose fault lab and the kind cluster.
-- Build the evaluation suite with known incidents (before/after numbers for neatlogs).
+- Finish the fault lab: 7 Docker Compose faults and 5 kind faults (in progress).
+- First live runs when the API keys are in `.env`.
+- Evaluation: `evals/run_evals.py` with prompt v1 (baseline) and v2 (with the book method). Compare the numbers and the neatlogs traces.
 
 ## Demo
 

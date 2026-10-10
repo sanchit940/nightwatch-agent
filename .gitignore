@@ -9,3 +9,4 @@ __pycache__/
 *.sqlite
 runs/
 .DS_Store
+*.egg-info/

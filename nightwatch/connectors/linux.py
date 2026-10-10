@@ -102,7 +102,7 @@ def _exec(target: str, script: str, timeout: float = 20) -> ToolOutput:
         text += f"\n[stderr]\n{res.stderr}"
     if res.exit_code == 1 and "No such container" in res.stderr:
         return ToolOutput(False, text, "NOT_FOUND")
-    if res.exit_code in (126, 127) or "is not running" in res.stderr:
+    if res.exit_code in (126, 127) or "Error response from daemon" in res.stderr:  # not running, restarting, paused
         return ToolOutput(False, text, "TARGET_UNAVAILABLE")
     # Diagnostic scripts can exit non-zero when one optional file is missing; keep the output.
     return ToolOutput(res.error_code is None, text, res.error_code)
