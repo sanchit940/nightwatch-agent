@@ -195,3 +195,23 @@ def test_verification_regex_and_best_round(monkeypatch):
     monkeypatch.setattr(worker, "run_check", fake)
     v = worker.verify([{"tool": "t", "args": {}, "id": "A"}, {"tool": "t", "args": {}, "id": "B"}], wait_s=0.2, interval_s=0.05)
     assert v["passed"] == 1 and v["status"] == "partially_resolved"
+
+
+def test_not_a_fix_guard_rejects_ineffective_proposal(env):
+    from types import SimpleNamespace
+    from nightwatch.agent import Agent, RunStats
+    from nightwatch.config import Settings
+    policy, audit, worker, state = env
+    s = Settings()
+    s.neatlogs_api_key = ""
+    s.llm_api_key = "test"
+    agent = Agent(s, policy, audit)
+    base = {"action": "restart_container", "params": {"container": "nw-redis"}, "reason": "r", "expected_impact": "i",
+            "risk": "x", "rollback": "y", "verification": [{"tool": "docker_stats", "args": {}}]}
+    stats, proposals = RunStats(), []
+    bad = SimpleNamespace(id="t1", name="propose_action", input={**base, "expected_effect": "no_effect_on_symptom"})
+    res = agent._dispatch("inc-test", bad, policy.new_budget(), stats, proposals)
+    assert res.get("is_error") and "NOT_A_FIX" in res["content"] and proposals == []
+    ok = SimpleNamespace(id="t2", name="propose_action", input={**base, "expected_effect": "restores_service_temporarily"})
+    res = agent._dispatch("inc-test", ok, policy.new_budget(), stats, proposals)
+    assert not res.get("is_error") and len(proposals) == 1

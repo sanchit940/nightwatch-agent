@@ -46,12 +46,13 @@ CHECKS: dict[str, tuple[str, str]] = {
                "grep -vE ' (proc|sysfs|cgroup2?|devpts|mqueue|securityfs|debugfs|tracefs|fusectl|configfs|bpf) ' /proc/mounts"),
     "io": ("Block device I/O counters (/proc/diskstats, two reads 3 s apart) and io pressure.",
            "echo '== t0'; grep -vE ' (loop|ram)[0-9]' /proc/diskstats; sleep 3; echo '== t0+3s'; grep -vE ' (loop|ram)[0-9]' /proc/diskstats; cat /proc/pressure/io 2>/dev/null"),
-    "processes": ("Processes with state, CPU time, RSS and command, sorted by RSS. D state = uninterruptible (I/O) wait.",
-                  _HAVE + "if have ps && ps -eo pid >/dev/null 2>&1; then ps -eo pid,ppid,stat,pcpu,rss,etime,comm,args --sort=-rss | head -40; else "
-                  "echo 'PID STATE RSS_KB UTIME_TICKS CMD'; for d in /proc/[0-9]*; do p=${d#/proc/}; "
-                  "s=$(cut -d' ' -f3 $d/stat 2>/dev/null); u=$(cut -d' ' -f14 $d/stat 2>/dev/null); "
+    "processes": ("Processes with parent PID, state, AGE (seconds since start; compare with the container uptime to spot processes that appeared recently), CPU time, RSS and command, sorted by RSS. D state = uninterruptible (I/O) wait.",
+                  _HAVE + "if have ps && ps -eo pid >/dev/null 2>&1; then ps -eo pid,ppid,stat,pcpu,rss,etimes,comm,args --sort=-rss | head -40; else "
+                  "hz=$(getconf CLK_TCK 2>/dev/null || echo 100); up=$(cut -d. -f1 /proc/uptime); "
+                  "echo 'PID PPID STATE AGE_S RSS_KB UTIME_TICKS CMD'; for d in /proc/[0-9]*; do p=${d#/proc/}; "
+                  "set -- $(cut -d' ' -f3,4,14,22 $d/stat 2>/dev/null); [ -n \"$4\" ] || continue; "
                   "r=$(grep VmRSS $d/status 2>/dev/null | tr -s ' ' | cut -d' ' -f2); "
-                  "c=$(tr '\\0' ' ' < $d/cmdline 2>/dev/null | cut -c1-120); echo \"$p $s ${r:-0} $u $c\"; done | sort -k3 -n -r | head -40; fi"),
+                  "c=$(tr '\\0' ' ' < $d/cmdline 2>/dev/null | cut -c1-120); case \"$c\" in *'have() {'*) continue;; esac; echo \"$p $2 $1 $((up - $4 / hz)) ${r:-0} $3 $c\"; done | sort -k5 -n -r | head -40; fi"),
     "cpu_top": ("Per-process CPU usage sampled over 3 s (from /proc/<pid>/stat utime+stime deltas).",
                 "snap() { for d in /proc/[0-9]*; do set -- $(cut -d' ' -f1,14,15 $d/stat 2>/dev/null); [ -n \"$1\" ] && echo \"$1 $(($2+$3))\"; done; }; "
                 "snap > /tmp/.nw_a 2>/dev/null || snap > /dev/shm/.nw_a; sleep 3; snap > /tmp/.nw_b 2>/dev/null || snap > /dev/shm/.nw_b; "

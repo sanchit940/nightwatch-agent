@@ -66,3 +66,23 @@ Free-to-paid conversion (assumption): 5% of free workspaces per month.
 2. What is the break-even customer count for the Team plan only?
 3. What happens to gross margin if every incident uses Opus instead of Haiku?
 4. What is the runway with $50 000 starting cash in the downside case?
+
+## 8. Prompt to paste into Ari (cfo.ai)
+
+Copy this text into Ari as one message. Then change any assumption Ari asks about.
+
+> I am planning a new SaaS company. Please build an 18-month financial model with Upside, Base and Downside scenarios, and show pricing, costs, revenue, gross margin, cash and runway.
+>
+> Product: NightWatch, an AI on-call agent for Docker and Kubernetes teams. It investigates incidents and applies approved fixes.
+>
+> Pricing: Free $0; Team $199/month; Business $799/month; overage $0.50 per incident above quota.
+>
+> Variable cost per paying customer per month: LLM $3 (small model) to $20 (large model); hosting $8; observability $5; support $20.
+>
+> Fixed costs per month: 2 founders $6,000; cloud and tools $400; LLM for development $300; marketing $500.
+>
+> New paying customers per month: Downside 2, Base 5, Upside 10. Plan mix Team/Business: 90/10, 80/20, 70/30. Monthly churn: 5%, 3%, 2%.
+>
+> Starting cash: $50,000.
+>
+> Questions: (1) Runway in each scenario. (2) Month of break-even in each scenario. (3) Break-even customer count with the Team plan only. (4) Gross margin if every incident uses the large model.

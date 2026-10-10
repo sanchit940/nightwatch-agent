@@ -55,7 +55,7 @@ you are careful, you show evidence, and you never change infrastructure without 
 
 V3_RULES = """
 # Proposal rules (v3)
-- Propose an action ONLY when you expect that action alone to remove the root cause. Set fixes_root_cause accordingly.
+- Propose an action ONLY when you expect that action alone to remove the root cause (expected_effect=removes_root_cause).
 - Never propose an action to draw attention, as a placeholder, or "to be safe". Put manual steps in the report
   recommendations with type "manual".
 - A restart does not change configuration, environment variables, images or limits. If the cause is a bad config,
@@ -64,11 +64,26 @@ V3_RULES = """
 """
 
 
+V4_RULES = """
+# Proposal rules (v4)
+- Propose an action only if it removes the root cause (expected_effect=removes_root_cause) or safely restores service
+  now (expected_effect=restores_service_temporarily). For a temporary mitigation, ALSO recommend the permanent fix as
+  a manual step in the report. Never propose an action that you expect to have no effect on the symptom.
+- At night, restoring service safely is valuable. Prefer the smallest reversible action that restores service.
+- A restart does not change configuration, environment variables, images or limits. If the cause is a bad config,
+  env value or image, a restart keeps the fault: use a rollback of the change if an allowed action does that,
+  otherwise escalate a manual config fix.
+- A restart DOES end processes and clears tmpfs. Use process AGE and parent PID (linux_check check=processes) to tell
+  processes that appeared recently, outside the normal process tree, from the normal workload.
+- If an action deletes data (for example, a restart clears a tmpfs), say so in risk and give a recovery plan.
+"""
+
+
 def system_prompt(version: str) -> str:
     inventory = (ROOT / "inventory.yaml").read_text()
     if version == "v1":
         return V1 + "\n\n# Inventory\n" + inventory
     method = (ROOT / "knowledge" / "methodology.md").read_text()
-    core = V2_CORE + (V3_RULES if version == "v3" else "")
+    core = V2_CORE + {"v3": V3_RULES, "v4": V4_RULES}.get(version, "")
     return (core + "\n# Inventory (trusted)\n```yaml\n" + inventory + "```\n\n"
             "# Method reference (from Gregg, Systems Performance 2e; other runbooks: get_runbook topic=index)\n" + method)

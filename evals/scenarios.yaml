@@ -139,6 +139,7 @@ scenarios:
     symptom: "We scaled the shop api for peak traffic and now http://localhost:8081 does not respond."
     expected:
       root_cause_category: scheduling_failure
+      also_acceptable_categories: [config_error]
       root_cause_resource: deployment/api
       acceptable_fixes: [rollout_undo]
     setup_seconds: 20

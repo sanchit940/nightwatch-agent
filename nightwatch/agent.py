@@ -78,10 +78,12 @@ PROPOSE_TOOL = {
                                                     for a in ACTIONS.values())),
     "input_schema": {
         "type": "object", "additionalProperties": False,
-        "required": ["action", "params", "fixes_root_cause", "reason", "expected_impact", "risk", "rollback", "verification"],
+        "required": ["action", "params", "expected_effect", "reason", "expected_impact", "risk", "rollback", "verification"],
         "properties": {
             "action": {"type": "string", "enum": sorted(ACTIONS)},
-            "fixes_root_cause": {"type": "boolean", "description": "true only if this action alone is expected to remove the root cause"},
+            "expected_effect": {"type": "string", "enum": ["removes_root_cause", "restores_service_temporarily", "no_effect_on_symptom"],
+                                "description": "What this action does to the incident. 'restores_service_temporarily' = a safe mitigation; "
+                                               "then also recommend the permanent fix as a manual step. Actions with no effect are rejected."},
             "params": {"type": "object"},
             "reason": {"type": "string", "description": "Why this fixes the root cause, with evidence references"},
             "expected_impact": {"type": "string"},
@@ -220,18 +222,18 @@ class Agent:
             self.on_event("hypotheses", args)
             return {"type": "tool_result", "tool_use_id": block.id, "content": "recorded"}
         if name == "propose_action":
-            if args.get("fixes_root_cause") is not True:
+            if args.get("expected_effect") not in ("removes_root_cause", "restores_service_temporarily"):
                 # Deterministic guard: a change that the agent itself does not expect to fix the cause is noise and risk.
                 stats.policy_denials += 1
                 self.audit.log("proposal_rejected", {"action": args.get("action"), "params": args.get("params"),
                                                      "reason": "NOT_A_FIX"}, iid)
                 self.on_event("tool_denied", {"tool": "propose_action", "code": "NOT_A_FIX",
-                                              "reason": "the agent does not expect this action to fix the root cause"})
+                                              "reason": "the agent expects no effect on the symptom"})
                 return {"type": "tool_result", "tool_use_id": block.id, "is_error": True,
-                        "content": "POLICY NOT_A_FIX: propose only an action that you expect to remove the root cause. "
+                        "content": "POLICY NOT_A_FIX: propose only an action that removes the root cause or safely restores service. "
                                    "Put manual or follow-up steps in the report recommendations."}
             with _trace("policy.propose", "GUARDRAIL", action=args.get("action")):
-                justification = {k: args.get(k) for k in ("reason", "expected_impact", "risk", "preconditions", "rollback", "verification")}
+                justification = {k: args.get(k) for k in ("expected_effect", "reason", "expected_impact", "risk", "preconditions", "rollback", "verification")}
                 dec = self.policy.propose(iid, args.get("action", ""), args.get("params") or {}, justification)
             self.on_event("proposal", {"decision": dec.code, "detail": dec.reason, **args})
             if dec.allowed:
