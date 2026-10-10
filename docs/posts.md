@@ -30,6 +30,13 @@ v1 prompt: root cause 12/12, correct fix decision 8/12
 v2 prompt (Gregg's method): 12/12 and 11/12
 The method did not change cost. It stopped the agent from proposing changes that cannot fix the cause. #neatHack
 
-## Post 5 — v3 result
+## Post 5 — prompts move errors, rules remove them
 
-(fill in after the v3 run)
+v3 made the agent too careful (missed fixes). v4 made it too eager (restarts "for after the config is fixed").
+So we stopped tuning the prompt and added a human-owned rule: a restart cannot fix a config fault. The policy gate rejects it.
+v1 → v5: correct fix decisions 8/12 → 11/12, ineffective changes 4 → 1, same $0.06 per incident, 0 unauthorized changes in 60 runs. #neatHack
+
+## Post 6 — recovery
+
+A colleague fixed Redis by hand while NightWatch's approval was waiting. The approval was bound to the old state,
+so the worker refused it (STALE_STATE). The agent re-tested, saw HTTP 200, and reported "resolved" without taking credit. #neatHack

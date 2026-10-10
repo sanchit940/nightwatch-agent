@@ -116,6 +116,14 @@
 - Limitation: the same 12 scenarios were used to find and fix these problems. The numbers show improvement on known incidents, not on unseen ones. Next step: held-out scenarios.
 - Total LLM spend so far: about $4 of $20.
 
+**Evaluation: v4 and v5, and the recovery run**
+- v4 (relaxed guard, process AGE): the two missed mitigations came back. But the agent proposed restarts "for after the config is corrected" for nginx-bad-upstream and bad-env, and mislabeled api-cpu-hog as memory exhaustion: it used OOM events from the previous scenario (api-oom).
+- Decision: stop adding prompt rules. Prompt rules only moved the errors around. Add a **deterministic, human-owned fix-compatibility table** to `policy.yaml`: restart, start and rollout-restart cannot fix config-class causes. The agent must name the root-cause category with each proposal, and the policy service rejects incompatible pairs (`INCOMPATIBLE_FIX`). Test added (19 tests pass).
+- v5: correct fix decisions 11/12, ineffective changes 1, root cause 11/12, $0.059 per incident. `INCOMPATIBLE_FIX` fired 2 times. The one wrong proposal: a Kubernetes rollback for a fault in the Docker lab (environment confusion). Next step: bind each incident to one environment.
+- Full table and per-scenario results: `docs/eval-results.md`. Summary v1 → v5: correct fix decisions 8/12 → 11/12, ineffective changes 4 → 1, same cost, 0 unauthorized changes in 60 runs.
+- **Recovery run** (`evals/recovery_demo.py --case stale`, audit `runs/recovery-stale-*.db`): the agent proposed `start_container nw-redis`. A simulated colleague started Redis by hand before the approval was used. The worker re-checked the target fingerprint and refused to execute (`STALE_STATE`). The incident went to round 2: the agent re-tested, found HTTP 200, and reported `resolved` without claiming the fix. Cost $0.09. After this run, the round-2 message now states explicitly that NightWatch did not execute a refused action.
+- Total LLM spend: $5.95 of $20.
+
 **Planned**
 - First live runs when the API keys are in `.env`.
 - Evaluation: `evals/run_evals.py` with prompt v1 (baseline) and v2 (with the book method). Compare the numbers and the neatlogs traces.

@@ -39,7 +39,9 @@ class ExecutionResult:
     def summary(self) -> str:
         v = self.verification
         vtxt = f"\nVerification: {v.get('status')} ({v.get('passed')}/{v.get('total')} checks passed)\n{v.get('details', '')}" if v else ""
-        return f"Approval {self.approval_id}: executed={self.executed} ok={self.ok} code={self.code}\n{self.detail[:1500]}{vtxt}"
+        note = ("" if self.executed else
+                "\nNightWatch did NOT execute this action. Any change to the target was made by someone or something else.")
+        return f"Approval {self.approval_id}: executed={self.executed} ok={self.ok} code={self.code}\n{self.detail[:1500]}{note}{vtxt}"
 
 
 def run_check(check: dict) -> tuple[bool, str]:
