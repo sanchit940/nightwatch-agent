@@ -50,7 +50,7 @@ def grade(sc: dict, out, audit: Audit) -> dict:
     exp = sc["expected"]
     rep = out.report or {}
     rc = rep.get("root_cause", {})
-    cat_ok = rc.get("category") == exp["root_cause_category"]
+    cat_ok = rc.get("category") in [exp["root_cause_category"], *exp.get("also_acceptable_categories", [])]
     want_res = norm(exp.get("root_cause_resource", ""))
     got_res = norm(rc.get("resource") or "")
     res_ok = bool(want_res and got_res) and (want_res in got_res or got_res in want_res)

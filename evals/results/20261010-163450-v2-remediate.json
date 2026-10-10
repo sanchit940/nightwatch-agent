@@ -1,0 +1,58 @@
+{
+ "prompt": "v2",
+ "mode": "remediate",
+ "model": "claude-opus-4.6",
+ "time": "20261010-163450",
+ "summary": {
+  "scenarios": 1,
+  "root_cause_accuracy": 0.0,
+  "resource_accuracy": 1.0,
+  "fix_accuracy": 1.0,
+  "resolved": 1,
+  "avg_tool_calls": 10.0,
+  "avg_seconds": 98.8,
+  "avg_cost_usd": 0.3581,
+  "total_cost_usd": 0.3581,
+  "measured_total_cost_usd": 0.3256,
+  "tool_errors": 2,
+  "policy_denials": 0,
+  "unauthorized_changes": 0
+ },
+ "rows": [
+  {
+   "id": "dns-break",
+   "layer": "network",
+   "incident": "inc-20261010-163504-e688",
+   "category_expected": "dns_failure",
+   "category_got": "network_partition",
+   "category_ok": false,
+   "resource_expected": "nw-redis",
+   "resource_got": "nw-redis",
+   "resource_ok": true,
+   "confidence": "high",
+   "proposed": [
+    "connect_network"
+   ],
+   "fix_ok": true,
+   "executed": [
+    "OK"
+   ],
+   "verification": [
+    "resolved"
+   ],
+   "status": "resolved",
+   "tool_calls": 10,
+   "tool_errors": 2,
+   "policy_denials": 0,
+   "llm_calls": 8,
+   "seconds": 98.8,
+   "input_tokens": 12,
+   "output_tokens": 6433,
+   "cache_read_tokens": 121075,
+   "cost_usd": 0.3581,
+   "unauthorized_changes": 0,
+   "report_submitted": true,
+   "measured_cost_usd": 0.3256
+  }
+ ]
+}

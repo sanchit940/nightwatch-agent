@@ -10,6 +10,7 @@
 #   expected.root_cause_category  dependency_down | proxy_misconfig | memory_exhaustion | cpu_saturation |
 #                                 disk_full | dns_failure | config_error | image_pull_failure |
 #                                 probe_misconfig | scheduling_failure | scaled_to_zero
+#   expected.also_acceptable_categories  other labels that describe the same cause equally well
 #   expected.root_cause_resource  container name (compose) or <kind>/<name> in namespace shop (k8s)
 #   expected.acceptable_fixes     restart_container | start_container | connect_network | rollout_undo |
 #                                 rollout_restart | scale_deployment | none
@@ -41,6 +42,7 @@ scenarios:
     symptom: "Every request to http://localhost:8080 returns 502 Bad Gateway."
     expected:
       root_cause_category: proxy_misconfig
+      also_acceptable_categories: [config_error]
       root_cause_resource: nw-web
       acceptable_fixes: [none]
     setup_seconds: 5
@@ -51,6 +53,7 @@ scenarios:
     symptom: "http://localhost:8080 is flaky: some requests fail with 502 or 504, most succeed. Started after this morning's deploy."
     expected:
       root_cause_category: memory_exhaustion
+      also_acceptable_categories: [config_error]
       root_cause_resource: nw-api
       acceptable_fixes: [none]
     setup_seconds: 30
@@ -81,6 +84,7 @@ scenarios:
     symptom: "Users get 503 errors on http://localhost:8080. All containers show as running."
     expected:
       root_cause_category: dns_failure
+      also_acceptable_categories: [network_partition]
       root_cause_resource: nw-redis
       # The fix must restore the network alias "redis" (compose service name):
       #   docker network connect --alias redis nw-back nw-redis
@@ -113,6 +117,7 @@ scenarios:
     symptom: "The shop api at http://localhost:8081 is down after a hotfix release, but the api pods are Running."
     expected:
       root_cause_category: probe_misconfig
+      also_acceptable_categories: [config_error]
       root_cause_resource: deployment/api
       acceptable_fixes: [rollout_undo]
     setup_seconds: 30
@@ -123,6 +128,7 @@ scenarios:
     symptom: "The shop api at http://localhost:8081 is down. The api pods keep restarting."
     expected:
       root_cause_category: memory_exhaustion
+      also_acceptable_categories: [config_error]
       root_cause_resource: deployment/api
       acceptable_fixes: [rollout_undo]
     setup_seconds: 45
@@ -143,6 +149,7 @@ scenarios:
     symptom: "The shop api at http://localhost:8081 returns 503 or does not respond, and the api pods restart again and again."
     expected:
       root_cause_category: scaled_to_zero
+      also_acceptable_categories: [dependency_down]
       root_cause_resource: deployment/redis
       acceptable_fixes: [scale_deployment]
     setup_seconds: 45

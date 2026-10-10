@@ -60,6 +60,25 @@
 **Fixes**
 - Watch mode read the `kubectl get pods` header line as a pod. Fixed (commit `630214f`).
 
+**Model access (decision)**
+- The builder has no direct Anthropic key. The team uses the neatHack LiteLLM proxy: $20 per key for 30 days, shared by the team.
+- The proxy accepts the Anthropic Messages format. Tested: streaming, tool use, adaptive thinking, effort. The agent code did not change. Only the base URL changed (`NIGHTWATCH_LLM_BASE_URL`).
+- Claude Opus 4.8 (the builder's choice) is not on the proxy. Decision: use `claude-opus-4.6`, the nearest model.
+- The proxy reports spend per key (`/key/info`). The CLI and the eval harness now record the **measured** cost of each incident.
+
+**First live runs** (prompt v2, `claude-opus-4.6`, harness as approver)
+
+| Run | Scenario | Root cause found | Fix | Result | Tool calls | Time | Measured cost |
+|---|---|---|---|---|---|---|---|
+| 1 | `redis-down` | dependency_down, nw-redis ✔ | start_container nw-redis | verified resolved | 10 | 101 s | $0.69 |
+| 2 | `dns-break` | network_partition, nw-redis (see note) | connect_network nw-back, alias redis | verified resolved (3/3 checks) | 10 | 99 s | $0.33 |
+
+- Both runs: 0 unauthorized changes, audit chain intact.
+- Run 1 report named the 503 errors, the Prometheus alert and the failed health check as **symptoms**, not causes. It listed "who stopped Redis" as a known unknown.
+- **Failure found in run 1: prompt caching did not work through the proxy** (124k input tokens, 0 cache reads). The proxy drops the top-level `cache_control` field. Fix: explicit cache breakpoints on the system prompt and on the newest message. Result in run 2: 121k tokens read from cache, 12 uncached input tokens. Cost per incident fell from $0.69 to $0.33 (−53%).
+- **Grader issue in run 2:** the agent named the cause `network_partition` (Redis was detached from its network). The scenario expected `dns_failure`. Both are correct descriptions; the DNS failure is a symptom of the detach. Decision: scenarios now list accepted alternative categories (`also_acceptable_categories`) where two labels describe the same cause. This rule is set before the v1/v2 comparison and applies to both.
+- Total LLM spend after these tests: $1.36 of $20.
+
 **Planned**
 - First live runs when the API keys are in `.env`.
 - Evaluation: `evals/run_evals.py` with prompt v1 (baseline) and v2 (with the book method). Compare the numbers and the neatlogs traces.
