@@ -118,7 +118,10 @@ def _busybox(source: str, op: str, *args: str, timeout: float = 15) -> dict:
 
 
 def _out(r: dict) -> ToolOutput:
-    return ToolOutput(bool(r.get("ok")), json.dumps(r, indent=1), r.get("error_code"), data=r)
+    code = r.get("error_code")
+    if not r.get("ok") and not code:
+        code = f"HTTP_{r['status']}" if r.get("status") else f"{(r.get('stage') or r.get('op') or 'probe').upper()}_FAILED"
+    return ToolOutput(bool(r.get("ok")), json.dumps(r, indent=1), code, data=r)
 
 
 class DnsArgs(Args):

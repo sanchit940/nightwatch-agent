@@ -35,6 +35,8 @@ class Settings:
     prometheus_url: str = "http://localhost:9090"
     neatlogs_api_key: str = ""
     prompt_version: str = "v2"
+    llm_base_url: str = ""      # e.g. the neatHack LiteLLM proxy; empty = api.anthropic.com
+    llm_api_key: str = ""
     tags: list[str] = field(default_factory=list)
 
     @classmethod
@@ -47,7 +49,24 @@ class Settings:
         s.prometheus_url = os.environ.get("PROMETHEUS_URL", s.prometheus_url)
         s.neatlogs_api_key = os.environ.get("NEATLOGS_API_KEY", "")
         s.prompt_version = os.environ.get("NIGHTWATCH_PROMPT", s.prompt_version)
+        # Own variable names: a parent process (for example Claude Code) can set ANTHROPIC_BASE_URL.
+        s.llm_base_url = os.environ.get("NIGHTWATCH_LLM_BASE_URL", "")
+        s.llm_api_key = os.environ.get("LITELLM_API_KEY") or os.environ.get("ANTHROPIC_API_KEY", "")
         if db := os.environ.get("NIGHTWATCH_AUDIT_DB"):
             s.audit_db = Path(db)
         s.audit_db.parent.mkdir(parents=True, exist_ok=True)
         return s
+
+
+def llm_spend(s: Settings) -> float | None:
+    """Spend reported by a LiteLLM proxy for this key (USD), or None when not available."""
+    if not s.llm_base_url:
+        return None
+    import json
+    import urllib.request
+    try:
+        req = urllib.request.Request(s.llm_base_url.rstrip("/") + "/key/info", headers={"Authorization": f"Bearer {s.llm_api_key}"})
+        with urllib.request.urlopen(req, timeout=15) as r:
+            return float(json.loads(r.read())["info"]["spend"])
+    except Exception:  # noqa: BLE001
+        return None

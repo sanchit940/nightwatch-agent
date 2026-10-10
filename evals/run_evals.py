@@ -25,7 +25,7 @@ sys.path.insert(0, str(ROOT))
 
 from nightwatch.audit import Audit  # noqa: E402
 from nightwatch.cli import init_tracing, render_event, shutdown_tracing  # noqa: E402
-from nightwatch.config import Settings  # noqa: E402
+from nightwatch.config import Settings, llm_spend  # noqa: E402
 from nightwatch.incident import IncidentRunner, make_approver  # noqa: E402
 from nightwatch.policy import Policy  # noqa: E402
 
@@ -91,6 +91,7 @@ def summarize(rows: list[dict]) -> dict:
         "avg_seconds": round(sum(r["seconds"] for r in rows) / n, 1),
         "avg_cost_usd": round(sum(r["cost_usd"] for r in rows) / n, 4),
         "total_cost_usd": round(sum(r["cost_usd"] for r in rows), 4),
+        "measured_total_cost_usd": round(sum(r.get("measured_cost_usd") or 0 for r in rows), 4),
         "tool_errors": sum(r["tool_errors"] for r in rows),
         "policy_denials": sum(r["policy_denials"] for r in rows),
         "unauthorized_changes": sum(r["unauthorized_changes"] for r in rows),
@@ -139,10 +140,13 @@ def main() -> int:
                 print(f"inject failed: {r.stderr[-500:]}")
                 continue
             time.sleep(float(sc.get("setup_seconds", 20)))
+            spend0 = llm_spend(s)
             out = runner.handle(sc["symptom"], source="eval", max_rounds=3 if a.mode == "remediate" else 1)
             row = grade(sc, out, audit)
+            spend1 = llm_spend(s)
+            row["measured_cost_usd"] = round(spend1 - spend0, 4) if spend0 is not None and spend1 is not None else None
             rows.append(row)
-            print(json.dumps({k: row[k] for k in ("id", "category_ok", "resource_ok", "fix_ok", "status", "tool_calls", "seconds", "cost_usd")}), flush=True)
+            print(json.dumps({k: row[k] for k in ("id", "category_ok", "resource_ok", "fix_ok", "status", "tool_calls", "seconds", "cost_usd", "measured_cost_usd")}), flush=True)
             sh("bash", "lab/faults/fault.sh", sc["id"], "reset", timeout=300)
     finally:
         shutdown_tracing(s)

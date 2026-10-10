@@ -49,7 +49,7 @@ def render_event(kind: str, d: dict) -> None:
     elif kind == "thought":
         console.print(f"[dim italic]{d['text'].strip()[:600]}[/]")
     elif kind == "tool_call":
-        mark = "[green]✓[/]" if d["ok"] else f"[red]✗ {d.get('error_code')}[/]"
+        mark = "[green]✓[/]" if d["ok"] else f"[red]✗ {d.get('error_code') or 'FAILED'}[/]"
         console.print(f"{mark} [cyan]{d['tool']}[/] {json.dumps(d['args'])[:140]} [dim]{d['ms']} ms[/]")
     elif kind == "tool_denied":
         console.print(f"[red]⛔ policy denied {d['tool']}: {d['code']} {d['reason'][:200]}[/]")
@@ -109,10 +109,15 @@ def cmd_investigate(a, s: Settings) -> int:
     wait = {"interactive": 900, "wait": 900}.get(a.approval, 0)
     runner = IncidentRunner(s, audit, policy, approver, render_event, approval_wait_s=wait,
                             approver_name="human:cli" if a.approval == "interactive" else a.approval)
+    from .config import llm_spend
+    spend0 = llm_spend(s)
     try:
         out = runner.handle(a.symptom, source="human")
     finally:
         shutdown_tracing(s)
+    spend1 = llm_spend(s)
+    if spend0 is not None and spend1 is not None:
+        console.print(f"measured LLM spend for this incident: ${spend1 - spend0:.4f} (key total ${spend1:.2f})")
     st = out.stats
     console.print(f"\n[bold]{out.incident_id}[/] status={out.status} rounds={out.rounds} tool_calls={st.tool_calls} "
                   f"errors={st.tool_errors} denials={st.policy_denials} llm_calls={st.llm_calls} time={st.seconds}s "

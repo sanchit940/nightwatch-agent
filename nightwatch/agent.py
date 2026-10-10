@@ -126,6 +126,20 @@ REPORT_TOOL = {
 }
 
 
+def _with_tail_breakpoint(messages: list[dict]) -> list[dict]:
+    """Copy of messages with one cache breakpoint on the newest block, so each turn reads the previous prefix
+    from cache. Explicit breakpoints are used because some proxies drop the top-level cache_control field.
+    The stored history is not changed, so old breakpoints do not pile up (the API allows 4)."""
+    if not messages:
+        return messages
+    last = messages[-1]
+    content = last["content"]
+    blocks = [{"type": "text", "text": content}] if isinstance(content, str) else [dict(b) if isinstance(b, dict) else b for b in content]
+    if blocks and isinstance(blocks[-1], dict):
+        blocks[-1]["cache_control"] = {"type": "ephemeral"}
+    return messages[:-1] + [{**last, "content": blocks}]
+
+
 @dataclass
 class RunStats:
     tool_calls: int = 0
@@ -141,7 +155,9 @@ class RunStats:
 
     def cost_usd(self, model: str) -> float:
         # $ per million tokens (input, output). Cache reads 10% of input; cache writes 125%.
-        price = {"claude-opus-4-8": (5, 25), "claude-opus-5-5": (4, 20), "claude-sonnet-5-5": (2, 10), "claude-haiku-5-5": (0.1, 0.5)}
+        price = {"claude-opus-4-8": (5, 25), "claude-opus-4.6": (5, 25), "claude-opus-4-6": (5, 25),
+                 "claude-sonnet-4.6": (3, 15), "claude-sonnet-4-6": (3, 15), "claude-opus-5-5": (4, 20),
+                 "claude-sonnet-5-5": (2, 10), "claude-haiku-5-5": (0.1, 0.5)}
         i, o = price.get(model, (5, 25))
         return round((self.input_tokens * i + self.output_tokens * o + self.cache_read_tokens * i * 0.1
                       + self.cache_write_tokens * i * 1.25) / 1e6, 4)
@@ -163,7 +179,8 @@ class Agent:
         self.policy = policy
         self.audit = audit
         self.on_event = on_event or (lambda kind, data: None)
-        client = anthropic.Anthropic(max_retries=4)
+        kw = {"api_key": settings.llm_api_key} if settings.llm_api_key else {}
+        client = anthropic.Anthropic(max_retries=4, base_url=settings.llm_base_url or "https://api.anthropic.com", **kw)
         self.client = neatlogs.wrap(client, agent="nightwatch", prompt_version=settings.prompt_version) if neatlogs and settings.neatlogs_api_key else client
         self.system = system_prompt(settings.prompt_version)
         self.tools = [t.schema() for t in sorted(TOOLS.values(), key=lambda t: t.name)] + [HYPOTHESES_TOOL, PROPOSE_TOOL, REPORT_TOOL]
@@ -235,12 +252,11 @@ class Agent:
                 with self.client.messages.stream(
                     model=self.s.model,
                     max_tokens=self.s.max_tokens,
-                    system=self.system,
+                    system=[{"type": "text", "text": self.system, "cache_control": {"type": "ephemeral"}}],
                     tools=self.tools,
-                    messages=messages,
+                    messages=_with_tail_breakpoint(messages),
                     thinking={"type": "adaptive"},
                     output_config={"effort": self.s.effort},
-                    cache_control={"type": "ephemeral"},
                 ) as stream:
                     resp = stream.get_final_message()
                 stats.llm_calls += 1
