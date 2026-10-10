@@ -64,7 +64,10 @@ CHECK_SCHEMA = {
         "tool": {"type": "string", "description": "A read-only or diagnostic tool name, for example net_http_check"},
         "args": {"type": "object", "description": "Arguments for that tool"},
         "expect": {"type": "object", "additionalProperties": False, "properties": {
-            "ok": {"type": "boolean"}, "contains": {"type": "string"}, "not_contains": {"type": "string"}}}},
+            "ok": {"type": "boolean", "description": "Tool result ok flag, for example true for HTTP 2xx/3xx"},
+            "contains": {"type": "string", "description": "Literal, case-sensitive substring (NOT a regex)"},
+            "not_contains": {"type": "string", "description": "Literal substring that must be absent"},
+            "regex": {"type": "string", "description": "Python regular expression that must match the output"}}}},
 }
 
 PROPOSE_TOOL = {
@@ -85,7 +88,8 @@ PROPOSE_TOOL = {
             "preconditions": {"type": "array", "items": {"type": "string"}},
             "rollback": {"type": "string"},
             "verification": {"type": "array", "items": CHECK_SCHEMA, "minItems": 1,
-                             "description": "Checks that prove the ORIGINAL symptom is gone, for example the failing HTTP request now returns 200"},
+                             "description": ("Checks that prove the ORIGINAL symptom is gone. Best: repeat the failing request, for example "
+                                            "net_http_check with expect {ok: true}. Avoid checks on log lines in short time windows: they age out.")},
         },
     },
 }
@@ -140,11 +144,32 @@ def _with_tail_breakpoint(messages: list[dict]) -> list[dict]:
     return messages[:-1] + [{**last, "content": blocks}]
 
 
+def validate_report(r: dict) -> list[str]:
+    """Deterministic check of submit_report input. Smaller models sometimes send partial or flattened reports."""
+    errs = [f"missing field '{k}'" for k in REPORT_TOOL["input_schema"]["required"] if k not in r]
+    rc = r.get("root_cause")
+    if not isinstance(rc, dict):
+        errs.append("root_cause must be an object")
+    else:
+        for k in ("category", "resource", "description", "confidence"):
+            if not rc.get(k):
+                errs.append(f"root_cause.{k} is empty")
+        if rc.get("category") and rc["category"] not in ROOT_CAUSE_CATEGORIES:
+            errs.append(f"root_cause.category must be one of {ROOT_CAUSE_CATEGORIES}")
+    for k in ("evidence", "hypotheses", "recommendations", "known_unknowns"):
+        if k in r and not isinstance(r[k], list):
+            errs.append(f"{k} must be an array")
+    if isinstance(r.get("evidence"), list) and not r["evidence"]:
+        errs.append("evidence is empty: every claim needs a tool result")
+    return errs
+
+
 @dataclass
 class RunStats:
     tool_calls: int = 0
     tool_errors: int = 0
     policy_denials: int = 0
+    report_rejections: int = 0
     llm_calls: int = 0
     input_tokens: int = 0
     output_tokens: int = 0
@@ -281,7 +306,16 @@ class Agent:
                 results: list[dict] = [None] * len(uses)  # type: ignore[list-item]
                 report_idx = [i for i, b in enumerate(uses) if b.name == "submit_report"]
                 for i in report_idx:
-                    report = dict(uses[i].input)
+                    candidate = dict(uses[i].input)
+                    errs = validate_report(candidate)
+                    if errs:
+                        stats.report_rejections += 1
+                        self.audit.log("report_rejected", {"errors": errs}, iid)
+                        self.on_event("tool_denied", {"tool": "submit_report", "code": "INVALID_REPORT", "reason": "; ".join(errs)})
+                        results[i] = {"type": "tool_result", "tool_use_id": uses[i].id, "is_error": True,
+                                      "content": "INVALID_REPORT: " + "; ".join(errs) + ". Send the COMPLETE report again with all required fields as structured JSON."}
+                        continue
+                    report = candidate
                     self.audit.log("report", report, iid)
                     self.on_event("report", report)
                     results[i] = {"type": "tool_result", "tool_use_id": uses[i].id, "content": "report accepted"}

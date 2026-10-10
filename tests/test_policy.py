@@ -172,3 +172,26 @@ def test_secrets_redacted():
 def test_all_tools_are_read_or_diagnostic():
     assert all(int(t.risk) <= 1 for t in TOOLS.values())
     assert all(t.schema()["input_schema"].get("additionalProperties") is False for t in TOOLS.values())
+
+
+def test_report_validation_rejects_partial_report():
+    from nightwatch.agent import validate_report
+    assert validate_report({"summary": "everything in one string"})
+    good = {"summary": "s", "problem_statement": {}, "evidence": [{"tool": "t", "finding": "f"}], "hypotheses": [],
+            "root_cause": {"category": "dependency_down", "resource": "nw-redis", "description": "d", "confidence": "high"},
+            "known_unknowns": [], "recommendations": []}
+    assert validate_report(good) == []
+    assert validate_report({**good, "root_cause": {**good["root_cause"], "category": "made_up"}})
+
+
+def test_verification_regex_and_best_round(monkeypatch):
+    from nightwatch import worker
+    calls = {"n": 0}
+
+    def fake(check):
+        calls["n"] += 1
+        # check A passes only in round 1; check B never passes
+        return (check["id"] == "A" and calls["n"] <= 2), "x"
+    monkeypatch.setattr(worker, "run_check", fake)
+    v = worker.verify([{"tool": "t", "args": {}, "id": "A"}, {"tool": "t", "args": {}, "id": "B"}], wait_s=0.2, interval_s=0.05)
+    assert v["passed"] == 1 and v["status"] == "partially_resolved"

@@ -60,6 +60,13 @@ def run_check(check: dict) -> tuple[bool, str]:
         passed = False
     if exp.get("not_contains") and exp["not_contains"] in out.text:
         passed = False
+    if exp.get("regex"):
+        import re
+        try:
+            if not re.search(exp["regex"], out.text):
+                passed = False
+        except re.error as e:
+            return False, f"invalid regex: {e}"
     return passed, out.text[:600]
 
 
@@ -68,12 +75,18 @@ def verify(checks: list[dict], wait_s: float = 60, interval_s: float = 5) -> dic
     if not checks:
         return {"status": "unverified", "passed": 0, "total": 0, "details": "no verification checks were defined"}
     deadline = time.monotonic() + wait_s
+    best: list = []
+    best_passed = -1
     while True:
         results = [(c, *run_check(c)) for c in checks]
-        passed = sum(1 for _, ok, _ in results if ok)
-        if passed == len(checks) or time.monotonic() > deadline:
+        n = sum(1 for _, ok, _ in results if ok)
+        # Report the best round: a check that passed early (for example a startup log line) can age out later.
+        if n > best_passed:
+            best, best_passed = results, n
+        if n == len(checks) or time.monotonic() > deadline:
             break
         time.sleep(interval_s)
+    results, passed = best, best_passed
     status = "resolved" if passed == len(checks) else ("partially_resolved" if passed else "unresolved")
     details = "\n".join(f"- [{'PASS' if ok else 'FAIL'}] {c['tool']} {c.get('args')} expect={c.get('expect')}: {txt[:300]}"
                         for c, ok, txt in results)
