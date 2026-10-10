@@ -156,7 +156,7 @@ class RunStats:
     def cost_usd(self, model: str) -> float:
         # $ per million tokens (input, output). Cache reads 10% of input; cache writes 125%.
         price = {"claude-opus-4-8": (5, 25), "claude-opus-4.6": (5, 25), "claude-opus-4-6": (5, 25),
-                 "claude-sonnet-4.6": (3, 15), "claude-sonnet-4-6": (3, 15), "claude-opus-5-5": (4, 20),
+                 "claude-sonnet-4.6": (3, 15), "claude-haiku": (1, 5), "claude-sonnet-4-6": (3, 15), "claude-opus-5-5": (4, 20),
                  "claude-sonnet-5-5": (2, 10), "claude-haiku-5-5": (0.1, 0.5)}
         i, o = price.get(model, (5, 25))
         return round((self.input_tokens * i + self.output_tokens * o + self.cache_read_tokens * i * 0.1
