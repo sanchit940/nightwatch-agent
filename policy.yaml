@@ -1,0 +1,50 @@
+# NightWatch policy. Owned by humans. The agent cannot read or change this file through any tool.
+# Targets use the form <connector>:<path>, matched with shell-style wildcards.
+version: 1
+
+scope:
+  # Targets the agent may read or test (risk 0 and 1).
+  read_targets:
+    - "docker:container/*"
+    - "docker:network/*"
+    - "linux:nw-*"
+    - "linux:nightwatch-control-plane"
+    - "net:*"
+    - "k8s:shop/*"
+    - "k8s:_cluster/*"
+    - "k8s:kube-system/*"
+    - "prometheus"
+  # Targets the agent may propose changes for (risk 2). Stricter than read scope.
+  action_targets:
+    - "docker:container/nw-*"
+    - "docker:network/nw-*"
+    - "k8s:shop/deployments/*"
+  # Never touch these, even to read. Deny wins over allow.
+  deny_targets:
+    - "k8s:*/secrets/*"                  # a named secret: only the list (metadata) is readable
+
+limits:
+  max_tool_calls: 40              # per investigation
+  max_wall_seconds: 900           # per investigation
+  max_risk_without_approval: 1    # risk 0 (read) and 1 (bounded tests) run without approval
+  block_risk_at_or_above: 3       # risk 3 (destructive) is blocked in v1
+  approval_ttl_seconds: 900       # an approval expires after 15 minutes
+
+actions:
+  allowed:
+    - restart_container
+    - start_container
+    - connect_network
+    - rollout_undo
+    - rollout_restart
+    - scale_deployment
+
+# Standing approvals written by a human for unattended operation (night mode).
+# Each rule is bounded by action, target pattern and rate. All disabled by default:
+# with no enabled rule, every change waits for a human.
+auto_approve:
+  - name: night-restart-redis
+    enabled: false
+    action: start_container
+    targets: ["docker:container/nw-redis"]
+    max_per_hour: 2

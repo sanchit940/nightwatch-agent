@@ -1,0 +1,13 @@
+# Watch mode checks. Deterministic, cheap, no model calls while healthy.
+http:
+  - name: web
+    url: http://localhost:8080/
+    max_ms: 1500
+  - name: api-health
+    url: http://api:8000/healthz
+    source: nw-toolbox
+docker:
+  enabled: true
+  prefix: nw-
+prometheus_alerts: true
+kubernetes_namespaces: [shop]

@@ -1,0 +1,25 @@
+[project]
+name = "nightwatch"
+version = "0.1.0"
+description = "AI DevOps agent that investigates incidents with evidence and changes infrastructure only after approval."
+requires-python = ">=3.10,<3.14"
+dependencies = [
+  "anthropic>=1.13",
+  "neatlogs[anthropic]>=1.4.26",
+  "pydantic>=2.10",
+  "pyyaml>=6",
+  "rich>=13",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+nightwatch = "nightwatch.cli:main"
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["nightwatch*"]

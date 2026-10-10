@@ -1,0 +1,45 @@
+# Trusted infrastructure inventory. Owned by humans. Loaded into the agent prompt as facts about the environment.
+environments:
+  - name: lab-docker
+    platform: docker-compose
+    description: Demo shop service on Docker Desktop (Linux VM).
+    networks: [nw-front, nw-back]
+    services:
+      - name: web
+        container: nw-web
+        role: nginx reverse proxy; public entry point
+        endpoint: http://localhost:8080/   # from the agent host
+        upstream: http://api:8000          # inside nw-front
+      - name: api
+        container: nw-api
+        role: Python HTTP API; counter stored in Redis
+        endpoints: ["http://api:8000/", "http://api:8000/healthz", "http://api:8000/metrics"]
+        depends_on: [redis]
+        limits: {memory: 256m, cpus: 0.5}
+      - name: redis
+        container: nw-redis
+        role: Redis key-value store
+        endpoint: redis:6379               # inside nw-back
+      - name: toolbox
+        container: nw-toolbox
+        role: diagnostics container on both networks; use it as a probe source
+      - name: prometheus
+        container: nw-prometheus
+        role: metrics and alerts for the lab
+        endpoint: http://localhost:9090
+      - name: loadgen
+        container: nw-loadgen
+        role: synthetic traffic to web (about 5 requests/second)
+    request_path: "client -> nw-web (nginx :80, host :8080) -> nw-api (:8000) -> nw-redis (:6379)"
+
+  - name: lab-k8s
+    platform: kubernetes (kind)
+    kube_context: kind-nightwatch
+    node_containers: [nightwatch-control-plane]
+    namespaces:
+      - name: shop
+        workloads:
+          - {kind: Deployment, name: api, port: 8000, probes: /healthz, depends_on: [redis], config: configmap/api-config}
+          - {kind: Deployment, name: redis, port: 6379}
+          - {kind: Deployment, name: toolbox, role: probe source for in-cluster network tests}
+        services: [api, redis]
