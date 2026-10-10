@@ -1,0 +1,30 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: toolbox
+  namespace: shop
+  labels:
+    app: toolbox
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: toolbox
+  template:
+    metadata:
+      labels:
+        app: toolbox
+    spec:
+      terminationGracePeriodSeconds: 1
+      containers:
+        - name: toolbox
+          image: python:3.12-alpine
+          imagePullPolicy: IfNotPresent
+          command: ["sleep", "infinity"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 200m
+              memory: 64Mi

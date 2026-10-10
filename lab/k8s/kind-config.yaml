@@ -1,0 +1,11 @@
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: nightwatch
+nodes:
+  - role: control-plane
+    extraPortMappings:
+      # Service shop/api (NodePort 30080) -> http://localhost:8081
+      - containerPort: 30080
+        hostPort: 8081
+        listenAddress: "127.0.0.1"
+        protocol: TCP

@@ -6,6 +6,8 @@ http:
   - name: api-health
     url: http://api:8000/healthz
     source: nw-toolbox
+  - name: k8s-api
+    url: http://localhost:8081/
 docker:
   enabled: true
   prefix: nw-

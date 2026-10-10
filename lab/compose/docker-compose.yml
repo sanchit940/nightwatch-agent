@@ -1,0 +1,91 @@
+name: nightwatch-lab
+
+services:
+  web:
+    image: nginx:1.27-alpine
+    container_name: nw-web
+    ports:
+      - "8080:80"
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+    networks:
+      - front
+    restart: unless-stopped
+
+  api:
+    build:
+      context: ./api
+    image: nightwatch-api:lab
+    container_name: nw-api
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      DATA_DIR: /data
+    tmpfs:
+      - /data:size=64m,mode=1777
+    mem_limit: 256m
+    memswap_limit: 256m
+    cpus: 0.5
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - front
+      - back
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: nw-redis
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    networks:
+      - back
+    restart: unless-stopped
+
+  toolbox:
+    image: python:3.12-alpine
+    container_name: nw-toolbox
+    command: ["sleep", "infinity"]
+    init: true
+    networks:
+      - front
+      - back
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    container_name: nw-prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=2d
+      - --web.enable-lifecycle
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+    networks:
+      - front
+    restart: unless-stopped
+
+  loadgen:
+    image: alpine:3.20
+    container_name: nw-loadgen
+    command: ["/bin/sh", "/loadgen.sh"]
+    init: true
+    environment:
+      TARGET: http://web/
+    volumes:
+      - ./loadgen/loadgen.sh:/loadgen.sh:ro
+    networks:
+      - front
+    restart: unless-stopped
+
+networks:
+  front:
+    name: nw-front
+  back:
+    name: nw-back

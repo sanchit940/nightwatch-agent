@@ -233,7 +233,7 @@ def start_container(p: RestartParams) -> ActionResult:
 class ConnectParams(Args):
     container: NAME
     network: NET
-    alias: str | None = Field(None, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$", description="Optional DNS alias on the network")
+    alias: str | None = Field(None, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$", description="DNS alias on the network. Default: the compose service name of the container")
 
 
 @action("connect_network", "Attach a container to a Docker network (docker network connect).", ConnectParams,
@@ -241,7 +241,12 @@ class ConnectParams(Args):
         fingerprint=lambda p: _fp(p.container),
         rollback="docker network disconnect <network> <container> returns to the previous state.")
 def connect_network(p: ConnectParams) -> ActionResult:
-    argv = ["docker", "network", "connect"] + (["--alias", p.alias] if p.alias else []) + [p.network, p.container]
+    alias = p.alias
+    if alias is None:
+        # Without its service alias the container is attached but not resolvable by its service name.
+        d = _inspect(p.container) or {}
+        alias = (d.get("Config", {}).get("Labels") or {}).get("com.docker.compose.service")
+    argv = ["docker", "network", "connect"] + (["--alias", alias] if alias else []) + [p.network, p.container]
     res = run(argv, timeout=20)
     return ActionResult(res.ok, res.as_text(), res.error_code or (None if res.ok else "ACTION_FAILED"))
 

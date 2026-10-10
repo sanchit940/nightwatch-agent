@@ -35,11 +35,12 @@ environments:
   - name: lab-k8s
     platform: kubernetes (kind)
     kube_context: kind-nightwatch
+    endpoint: http://localhost:8081/        # NodePort 30080 -> service shop/api, from the agent host
     node_containers: [nightwatch-control-plane]
     namespaces:
       - name: shop
         workloads:
-          - {kind: Deployment, name: api, port: 8000, probes: /healthz, depends_on: [redis], config: configmap/api-config}
+          - {kind: Deployment, name: api, replicas: 2, port: 8000, probes: "readiness+liveness /healthz (checks Redis)", depends_on: [redis], config: configmap/api-config}
           - {kind: Deployment, name: redis, port: 6379}
           - {kind: Deployment, name: toolbox, role: probe source for in-cluster network tests}
         services: [api, redis]
