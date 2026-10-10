@@ -91,7 +91,30 @@
 - Created https://github.com/sanchit940/nightwatch-agent (public), pushed `main`.
 - Builder decision: no Claude co-author lines. They were removed from all commit messages before the first push. The `Entire-Checkpoint` lines were kept, so Entire still links each checkpoint to its commit (`entire checkpoint list` shows the new commit IDs).
 - History scan before the push: no `.env` file, no API key, no approval secret in any commit.
-- **Privacy incident and fix:** Entire's push hook also pushed 10 checkpoint refs (`refs/entire/checkpoints/*`) to GitHub. These contain the session transcripts, which include the builder's personal and work email addresses. No API keys were in them (scanned). Within minutes the 10 refs were deleted from GitHub, and `push_sessions` was set to `false` in `.entire/settings.json`. The checkpoints remain local. Open item: decide how to show Entire evidence without the transcripts.
+- **Privacy incident and fix:** Entire's push hook also pushed 10 checkpoint refs (`refs/entire/checkpoints/*`) to GitHub. These contain the session transcripts, which include the builder's personal and work email addresses. No API keys were in them (scanned). Within minutes the 10 refs were deleted from GitHub, and `push_sessions` was set to `false` in `.entire/settings.json`. The checkpoints remain local.
+- Entire evidence decision (builder delegated it): publish checkpoint summaries only, in `docs/entire-evidence.md` (IDs, times, token counts, linked commits). No transcripts; the file was scanned for email addresses. No Entire mirror: with transcripts private it would only copy the code.
+- cfo.ai: the builder signed up and cancelled the subscription. Inputs and a ready-to-paste prompt for Ari: `business/cfo-plan-inputs.md` (measured unit costs; prices, customers and cash are assumptions for the builder to confirm).
+
+**Evaluation: prompt v1 → v2 → v3** (`claude-haiku`, diagnosis mode, 12 real faults, harness denies all changes)
+
+| Metric | v1 (no method) | v2 (+ Gregg method) | v3 (+ "propose only real fixes" guard) |
+|---|---|---|---|
+| Root cause correct | 12/12 | 12/12 | 12/12 |
+| Correct fix decision | 8/12 | 11/12 | 10/12 |
+| Ineffective change proposed | 4 | 1 | 0 |
+| Needed change not proposed | 0 | 0 | 2 |
+| Avg tool calls | 10.1 | 10.8 | 9.6 |
+| Avg measured cost | $0.059 | $0.060 | $0.053 |
+| Unauthorized changes | 0 | 0 | 0 |
+
+- v1 proposed restarts or scaling for config faults (nginx upstream, bad env, OOM setting, CPU request). These changes cannot remove the cause.
+- v2 (method from *Systems Performance*) removed 3 of these 4. The remaining one (`bad-env`): the agent proposed a restart and wrote that it would not fix the cause, "to highlight" the problem.
+- v3 added a deterministic guard: each proposal must declare its expected effect, and the orchestrator rejects an action that the agent itself expects not to work. Result: 0 ineffective proposals, but 2 needed mitigations were missed:
+  - `api-cpu-hog`: the agent took 16 injected CPU-burning processes for normal app workers. Cause: the process check showed no start time. Fix: the check now shows AGE and parent PID.
+  - `disk-full`: the agent correctly said a restart only mitigates (tmpfs fills again), and the strict rule blocked it. Fix: the guard now accepts `removes_root_cause` or `restores_service_temporarily`, and rejects only `no_effect_on_symptom`. Prompt v4 says that restoring service at night is valuable, and that an action that deletes data needs a recovery plan.
+- Grading rule (set before each run and applied to all versions with `evals/compare.py`): where two labels describe the same cause, both count (for example `config_error` for a deploy that set a 4-CPU request, `network_partition` for a detached Redis).
+- Limitation: the same 12 scenarios were used to find and fix these problems. The numbers show improvement on known incidents, not on unseen ones. Next step: held-out scenarios.
+- Total LLM spend so far: about $4 of $20.
 
 **Planned**
 - First live runs when the API keys are in `.env`.

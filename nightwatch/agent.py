@@ -78,9 +78,10 @@ PROPOSE_TOOL = {
                                                     for a in ACTIONS.values())),
     "input_schema": {
         "type": "object", "additionalProperties": False,
-        "required": ["action", "params", "expected_effect", "reason", "expected_impact", "risk", "rollback", "verification"],
+        "required": ["action", "params", "root_cause_category", "expected_effect", "reason", "expected_impact", "risk", "rollback", "verification"],
         "properties": {
             "action": {"type": "string", "enum": sorted(ACTIONS)},
+            "root_cause_category": {"type": "string", "enum": ROOT_CAUSE_CATEGORIES, "description": "Category of the root cause that this action addresses"},
             "expected_effect": {"type": "string", "enum": ["removes_root_cause", "restores_service_temporarily", "no_effect_on_symptom"],
                                 "description": "What this action does to the incident. 'restores_service_temporarily' = a safe mitigation; "
                                                "then also recommend the permanent fix as a manual step. Actions with no effect are rejected."},
@@ -233,7 +234,7 @@ class Agent:
                         "content": "POLICY NOT_A_FIX: propose only an action that removes the root cause or safely restores service. "
                                    "Put manual or follow-up steps in the report recommendations."}
             with _trace("policy.propose", "GUARDRAIL", action=args.get("action")):
-                justification = {k: args.get(k) for k in ("expected_effect", "reason", "expected_impact", "risk", "preconditions", "rollback", "verification")}
+                justification = {k: args.get(k) for k in ("root_cause_category", "expected_effect", "reason", "expected_impact", "risk", "preconditions", "rollback", "verification")}
                 dec = self.policy.propose(iid, args.get("action", ""), args.get("params") or {}, justification)
             self.on_event("proposal", {"decision": dec.code, "detail": dec.reason, **args})
             if dec.allowed:

@@ -39,6 +39,13 @@ actions:
     - rollout_restart
     - scale_deployment
 
+# Fix compatibility (owned by humans): actions that cannot remove a cause of this category.
+# A restart, start or rollout-restart does not change configuration, environment, image or limits.
+fix_compatibility:
+  restart_container: &keeps_config [config_error, proxy_misconfig, image_pull_failure, probe_misconfig, scheduling_failure, certificate_error, permission_error]
+  start_container: *keeps_config
+  rollout_restart: *keeps_config
+
 # Standing approvals written by a human for unattended operation (night mode).
 # Each rule is bounded by action, target pattern and rate. All disabled by default:
 # with no enabled rule, every change waits for a human.

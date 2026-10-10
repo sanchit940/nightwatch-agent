@@ -215,3 +215,13 @@ def test_not_a_fix_guard_rejects_ineffective_proposal(env):
     ok = SimpleNamespace(id="t2", name="propose_action", input={**base, "expected_effect": "restores_service_temporarily"})
     res = agent._dispatch("inc-test", ok, policy.new_budget(), stats, proposals)
     assert not res.get("is_error") and len(proposals) == 1
+
+
+def test_incompatible_fix_rejected(env):
+    policy, *_ = env
+    d = policy.propose("inc-test", "restart_container", {"container": "nw-web"},
+                       {"reason": "r", "root_cause_category": "proxy_misconfig", "verification": []})
+    assert not d.allowed and d.code == "INCOMPATIBLE_FIX"
+    d = policy.propose("inc-test", "restart_container", {"container": "nw-api"},
+                       {"reason": "r", "root_cause_category": "cpu_saturation", "verification": []})
+    assert d.allowed

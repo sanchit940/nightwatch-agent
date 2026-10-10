@@ -126,6 +126,12 @@ class Policy:
         if not ok:
             self.audit.log("policy_denied", {"action": action_name, "params": params, "reason": why}, incident_id)
             return Decision(False, "OUT_OF_SCOPE", why)
+        cause = (justification or {}).get("root_cause_category")
+        if cause in (self.cfg.get("fix_compatibility", {}) or {}).get(action_name, []):
+            why = (f"{action_name} cannot remove a {cause}: it does not change configuration, environment, image or limits. "
+                   "Use a rollback of the change if allowed, otherwise put the fix (and any restart after it) in the manual recommendations.")
+            self.audit.log("policy_denied", {"action": action_name, "params": params, "cause": cause, "reason": why}, incident_id)
+            return Decision(False, "INCOMPATIBLE_FIX", why)
         now = time.time()
         rec = {"id": "apr-" + uuid.uuid4().hex[:8], "incident_id": incident_id, "action": action_name,
                "params": p.model_dump(mode="json"), "targets": targets, "fingerprint": act.fingerprint(p),

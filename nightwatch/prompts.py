@@ -76,6 +76,8 @@ V4_RULES = """
 - A restart DOES end processes and clears tmpfs. Use process AGE and parent PID (linux_check check=processes) to tell
   processes that appeared recently, outside the normal process tree, from the normal workload.
 - If an action deletes data (for example, a restart clears a tmpfs), say so in risk and give a recovery plan.
+- Events before the incident start can belong to earlier, resolved incidents. Confirm that a past event (OOM kill,
+  restart) is still happening now with current counters (linux_check check=cgroup, docker_inspect) before you use it.
 """
 
 
@@ -84,6 +86,6 @@ def system_prompt(version: str) -> str:
     if version == "v1":
         return V1 + "\n\n# Inventory\n" + inventory
     method = (ROOT / "knowledge" / "methodology.md").read_text()
-    core = V2_CORE + {"v3": V3_RULES, "v4": V4_RULES}.get(version, "")
+    core = V2_CORE + {"v3": V3_RULES, "v4": V4_RULES, "v5": V4_RULES}.get(version, "")
     return (core + "\n# Inventory (trusted)\n```yaml\n" + inventory + "```\n\n"
             "# Method reference (from Gregg, Systems Performance 2e; other runbooks: get_runbook topic=index)\n" + method)
