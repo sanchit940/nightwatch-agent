@@ -79,6 +79,20 @@
 - **Grader issue in run 2:** the agent named the cause `network_partition` (Redis was detached from its network). The scenario expected `dns_failure`. Both are correct descriptions; the DNS failure is a symptom of the detach. Decision: scenarios now list accepted alternative categories (`also_acceptable_categories`) where two labels describe the same cause. This rule is set before the v1/v2 comparison and applies to both.
 - Total LLM spend after these tests: $1.36 of $20.
 
+**Model switch: `claude-haiku`** (builder decision, to save budget)
+- The proxy accepts adaptive thinking and effort for `claude-haiku`. No code change.
+- Run 3 (`redis-down`, Haiku): cost $0.08 (8× cheaper than Opus 4.6). The first report was correct (dependency_down, nw-redis, high confidence). The fix was approved, executed, and the site returned 200.
+- **Failures found in run 3:**
+  1. In round 2, Haiku sent a report with only a `summary` string. It replaced the correct report. Fix: the orchestrator validates every report against the schema and rejects an incomplete report with the list of missing fields; the model must send it again.
+  2. Verification showed 2/4. Haiku wrote a regex in a literal `contains` check, and a check on a startup log line aged out of its 1-minute window while the engine kept polling. Fix: the verification engine reports the best round; checks have a `regex` option; the tool description says that `contains` is literal and that short log windows age out.
+- Tests that ran: `pytest tests` → 17 passed (2 new: report validation, best-round verification).
+
+**Public repository**
+- Created https://github.com/sanchit940/nightwatch-agent (public), pushed `main`.
+- Builder decision: no Claude co-author lines. They were removed from all commit messages before the first push. The `Entire-Checkpoint` lines were kept, so Entire still links each checkpoint to its commit (`entire checkpoint list` shows the new commit IDs).
+- History scan before the push: no `.env` file, no API key, no approval secret in any commit.
+- **Privacy incident and fix:** Entire's push hook also pushed 10 checkpoint refs (`refs/entire/checkpoints/*`) to GitHub. These contain the session transcripts, which include the builder's personal and work email addresses. No API keys were in them (scanned). Within minutes the 10 refs were deleted from GitHub, and `push_sessions` was set to `false` in `.entire/settings.json`. The checkpoints remain local. Open item: decide how to show Entire evidence without the transcripts.
+
 **Planned**
 - First live runs when the API keys are in `.env`.
 - Evaluation: `evals/run_evals.py` with prompt v1 (baseline) and v2 (with the book method). Compare the numbers and the neatlogs traces.
