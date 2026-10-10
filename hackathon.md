@@ -53,8 +53,14 @@
 - `linux_check` reported `ok=True` when the target container was restarting. Fix: treat any Docker daemon error as `TARGET_UNAVAILABLE`.
 - `docker_events` printed Unix seconds. Fix: print ISO-8601 UTC, so the agent can correlate events with metrics and logs.
 
+- Fault lab done (commit `087d332`, see `lab/README.md`). Docker Compose lab: nginx → API → Redis, toolbox, Prometheus with 3 alert rules, load generator. kind cluster `nightwatch`, namespace `shop`. 12 real faults (no fake log lines, no hints in names or labels). Each fault was tested: inject → symptom seen → reset → HTTP 200.
+- Lab finding: after `dns-break`, a plain `docker network connect` does not repair name resolution. Fix: `connect_network` now adds the compose service name as the DNS alias by default.
+- Watch mode test: healthy lab → no findings. `redis-down` injected → 3 findings (web 503, api health 503, nw-redis exited), grouped into one incident.
+
+**Fixes**
+- Watch mode read the `kubectl get pods` header line as a pod. Fixed (commit `630214f`).
+
 **Planned**
-- Finish the fault lab: 7 Docker Compose faults and 5 kind faults (in progress).
 - First live runs when the API keys are in `.env`.
 - Evaluation: `evals/run_evals.py` with prompt v1 (baseline) and v2 (with the book method). Compare the numbers and the neatlogs traces.
 
