@@ -72,7 +72,9 @@ def check_k8s(namespace: str) -> list[Finding]:
     if not out.ok:
         return []
     found = []
-    for line in out.text.splitlines()[1:]:
+    lines = out.text.splitlines()
+    start = next((i + 1 for i, l in enumerate(lines) if l.startswith("NAME")), len(lines))
+    for line in lines[start:]:
         cols = line.split()
         if len(cols) < 3:
             continue
