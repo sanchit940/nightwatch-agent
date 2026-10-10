@@ -1,0 +1,58 @@
+{
+ "prompt": "v2",
+ "mode": "remediate",
+ "model": "claude-haiku",
+ "time": "20261010-164428",
+ "summary": {
+  "scenarios": 1,
+  "root_cause_accuracy": 0.0,
+  "resource_accuracy": 0.0,
+  "fix_accuracy": 1.0,
+  "resolved": 0,
+  "avg_tool_calls": 10.0,
+  "avg_seconds": 80.8,
+  "avg_cost_usd": 0.0993,
+  "total_cost_usd": 0.0993,
+  "measured_total_cost_usd": 0.0819,
+  "tool_errors": 1,
+  "policy_denials": 0,
+  "unauthorized_changes": 0
+ },
+ "rows": [
+  {
+   "id": "redis-down",
+   "layer": "docker",
+   "incident": "inc-20261010-164443-ee5f",
+   "category_expected": "dependency_down",
+   "category_got": null,
+   "category_ok": false,
+   "resource_expected": "nw-redis",
+   "resource_got": null,
+   "resource_ok": false,
+   "confidence": null,
+   "proposed": [
+    "start_container"
+   ],
+   "fix_ok": true,
+   "executed": [
+    "OK"
+   ],
+   "verification": [
+    "partially_resolved"
+   ],
+   "status": "partially_resolved",
+   "tool_calls": 10,
+   "tool_errors": 1,
+   "policy_denials": 0,
+   "llm_calls": 7,
+   "seconds": 80.8,
+   "input_tokens": 52,
+   "output_tokens": 8266,
+   "cache_read_tokens": 108976,
+   "cost_usd": 0.0993,
+   "unauthorized_changes": 0,
+   "report_submitted": true,
+   "measured_cost_usd": 0.0819
+  }
+ ]
+}

@@ -53,10 +53,22 @@ you are careful, you show evidence, and you never change infrastructure without 
 """
 
 
+V3_RULES = """
+# Proposal rules (v3)
+- Propose an action ONLY when you expect that action alone to remove the root cause. Set fixes_root_cause accordingly.
+- Never propose an action to draw attention, as a placeholder, or "to be safe". Put manual steps in the report
+  recommendations with type "manual".
+- A restart does not change configuration, environment variables, images or limits. If the cause is a bad config,
+  env value or image, a restart keeps the fault. Use a rollback of the change if an allowed action does that;
+  otherwise escalate a manual config fix.
+"""
+
+
 def system_prompt(version: str) -> str:
     inventory = (ROOT / "inventory.yaml").read_text()
     if version == "v1":
         return V1 + "\n\n# Inventory\n" + inventory
     method = (ROOT / "knowledge" / "methodology.md").read_text()
-    return (V2_CORE + "\n# Inventory (trusted)\n```yaml\n" + inventory + "```\n\n"
+    core = V2_CORE + (V3_RULES if version == "v3" else "")
+    return (core + "\n# Inventory (trusted)\n```yaml\n" + inventory + "```\n\n"
             "# Method reference (from Gregg, Systems Performance 2e; other runbooks: get_runbook topic=index)\n" + method)
