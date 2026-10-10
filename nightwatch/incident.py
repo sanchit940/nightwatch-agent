@@ -122,6 +122,33 @@ class IncidentRunner:
             except Exception as e:  # noqa: BLE001
                 self.audit.log("notify_failed", {"error": f"{type(e).__name__}: {e}"}, iid)
 
+    @staticmethod
+    def _who(user: str | None) -> str:
+        u = user or "unknown"
+        return f"<@{u.split(':', 1)[1]}>" if u.startswith("slack:") else u
+
+    def _instruction_text(self, g: dict, replaced: str | None) -> str:
+        quoted = "\n".join(f"> {l}" for l in g["text"].splitlines())
+        rep = f" Plan `{replaced}` was replaced. It was not executed." if replaced else ""
+        return f"✍️ Instruction from {self._who(g['user'])}:\n{quoted}\n{rep} NightWatch tests the instruction now."
+
+    def _announce_decision(self, iid: str, rec: dict, status: str, guidance: list[dict]) -> None:
+        """One place that tells Slack about every decision, whatever its source (Slack button, CLI, policy rule)."""
+        if not self.notifier:
+            return
+        from_slack = str(rec.get("approver") or "").startswith("slack:")
+        if status == "guidance":
+            for g in guidance:
+                self._notify(iid, self._instruction_text(g, rec["id"]))
+            if not str(guidance[0]["user"]).startswith("slack:"):
+                self.notifier.close_buttons(iid, rec["id"], f"✍️ Replaced by an instruction from {self._who(guidance[0]['user'])}. Not executed.")
+        elif status == "approved" and not from_slack:
+            self.notifier.close_buttons(iid, rec["id"], f"✅ Approved by {self._who(rec.get('approver'))}. NightWatch runs this exact change now.")
+            self._notify(iid, f"✅ {self._who(rec.get('approver'))} approved the plan.")
+        elif status == "rejected" and not from_slack:
+            self.notifier.close_buttons(iid, rec["id"], f"❌ Rejected by {self._who(rec.get('approver'))}. No change was made.")
+            self._notify(iid, f"❌ {self._who(rec.get('approver'))} rejected the plan. No change was made.")
+
     # ----- lifecycle -----
     def handle(self, symptom: str, source: str = "human", dedup_key: str | None = None, max_rounds: int = 3,
                incident_id: str | None = None) -> IncidentOutcome:
@@ -142,6 +169,7 @@ class IncidentRunner:
                     status, g = self._decide(aid, iid)
                     self.on_event("approval", {"id": aid, "status": status})
                     rec = self.audit.approval(aid)
+                    self._announce_decision(iid, rec, status, g)
                     if status == "approved":
                         r = self.worker.execute(aid)
                         self.on_event("execution", r.__dict__)
@@ -159,6 +187,8 @@ class IncidentRunner:
                             self._notify(iid, f"Approval `{aid}` is {status}. No change was made.")
             elif self.notifier and self.guidance_wait_s > 0 and (out.report or {}).get("resolution") != "resolved":
                 guidance = self._wait_guidance(iid)
+                for g in guidance:
+                    self._notify(iid, self._instruction_text(g, None))
             if not results and not guidance:
                 if any("pending" in n for n in notes):
                     out.status = "awaiting_approval"

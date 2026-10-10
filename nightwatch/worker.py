@@ -59,13 +59,20 @@ def run_check(check: dict) -> tuple[bool, str]:
     if "ok" in exp and bool(out.ok) != bool(exp["ok"]):
         passed = False
     if exp.get("contains") and exp["contains"] not in out.text:
-        passed = False
+        # Models often write a regex here although the field is literal. Accept it as a regex when it looks like one.
+        import re
+        looks_regex = any(t in exp["contains"] for t in (".*", ".+", "\\d", "\\s", "^", "$", "[", "|"))
+        try:
+            if not (looks_regex and re.search(exp["contains"], out.text, re.MULTILINE)):
+                passed = False
+        except re.error:
+            passed = False
     if exp.get("not_contains") and exp["not_contains"] in out.text:
         passed = False
     if exp.get("regex"):
         import re
         try:
-            if not re.search(exp["regex"], out.text):
+            if not re.search(exp["regex"], out.text, re.MULTILINE):
                 passed = False
         except re.error as e:
             return False, f"invalid regex: {e}"
@@ -90,9 +97,10 @@ def verify(checks: list[dict], wait_s: float = 60, interval_s: float = 5) -> dic
         time.sleep(interval_s)
     results, passed = best, best_passed
     status = "resolved" if passed == len(checks) else ("partially_resolved" if passed else "unresolved")
+    structured = [{"tool": c.get("tool"), "args": c.get("args"), "expect": c.get("expect"), "passed": ok} for c, ok, _ in results]
     details = "\n".join(f"- [{'PASS' if ok else 'FAIL'}] {c['tool']} {c.get('args')} expect={c.get('expect')}: {txt[:300]}"
                         for c, ok, txt in results)
-    return {"status": status, "passed": passed, "total": len(checks), "details": details}
+    return {"status": status, "passed": passed, "total": len(checks), "details": details, "checks": structured}
 
 
 class Worker:

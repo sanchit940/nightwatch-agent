@@ -225,3 +225,35 @@ def test_incompatible_fix_rejected(env):
     d = policy.propose("inc-test", "restart_container", {"container": "nw-api"},
                        {"reason": "r", "root_cause_category": "cpu_saturation", "verification": []})
     assert d.allowed
+
+
+def test_contains_accepts_regex_like_text(monkeypatch):
+    from nightwatch import worker
+    from nightwatch.connectors.base import ToolOutput
+    out = ToolOutput(True, "nw-api\tstate=running\nnw-redis\timage=redis\tstate=running")
+    monkeypatch.setattr(worker.TOOLS["docker_stats"], "fn", lambda a: out)
+    ok, _ = worker.run_check({"tool": "docker_stats", "args": {}, "expect": {"contains": "nw-redis.*state=running"}})
+    assert ok
+    ok, _ = worker.run_check({"tool": "docker_stats", "args": {}, "expect": {"contains": "nw-web"}})
+    assert not ok
+
+
+def test_verification_must_repeat_failing_request(env):
+    from types import SimpleNamespace
+    from nightwatch.agent import Agent, RunStats
+    from nightwatch.config import Settings
+    policy, audit, worker, state = env
+    s = Settings()
+    s.neatlogs_api_key, s.llm_api_key = "", "test"
+    agent = Agent(s, policy, audit)
+    iid = audit.open_incident("Users get 503 on http://localhost:8080.", "test")
+    base = {"action": "start_container", "params": {"container": "nw-redis"}, "root_cause_category": "dependency_down",
+            "severity": "P0", "expected_effect": "removes_root_cause", "reason": "r", "expected_impact": "i", "risk": "x", "rollback": "y"}
+    weak = SimpleNamespace(id="t1", name="propose_action", input={**base, "verification": [
+        {"tool": "docker_list_containers", "args": {}, "expect": {"contains": "nw-redis"}}]})
+    res = agent._dispatch(iid, weak, policy.new_budget(), RunStats(), [])
+    assert res.get("is_error") and "VERIFICATION_MISSES_SYMPTOM" in res["content"]
+    good = SimpleNamespace(id="t2", name="propose_action", input={**base, "verification": [
+        {"tool": "net_http_check", "args": {"url": "http://localhost:8080/"}, "expect": {"ok": True}}]})
+    res = agent._dispatch(iid, good, policy.new_budget(), RunStats(), [])
+    assert not res.get("is_error")

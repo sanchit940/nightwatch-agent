@@ -115,8 +115,7 @@ def build_app(bot_token: str, make: Callable[[], tuple[Audit, Policy]], slack_cf
         if aid and (audit.approval(aid) or {}).get("status") == "pending":
             policy.reject(aid, f"slack:{user}", "replaced by an approver instruction")
             notifier.close_buttons(iid, aid, f"✍️ <@{user}> gave another instruction at {_utc()}. This plan was not executed.")
-        quoted = "\n".join(f"> {l}" for l in text.splitlines())
-        notifier.post_update(iid, f"✍️ Instruction from <@{user}>:\n{quoted}\nNightWatch tests it now and posts the result here.")
+        # The incident runner posts the instruction into the thread when it picks it up (one place for every source).
 
     return app
 

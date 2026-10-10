@@ -116,8 +116,10 @@ EFFECT = {"removes_root_cause": "This removes the cause.",
           "restores_service_temporarily": "This restores service for now. The permanent fix needs a human."}
 
 
-def steps_from_audit(audit: Audit, iid: str, limit: int = 10) -> list[str]:
+def steps_from_audit(audit: Audit, iid: str, limit: int = 10, only_new: bool = False) -> list[str]:
+    """STE lines for the investigation steps. only_new: only the steps after the last Slack message of this incident."""
     seen, out = set(), []
+    start = audit.get_meta(iid, "slack_steps_posted", 0) if only_new else 0
     for e in audit.events(iid):
         if e["kind"] != "tool_call":
             continue
@@ -126,6 +128,9 @@ def steps_from_audit(audit: Audit, iid: str, limit: int = 10) -> list[str]:
         if line not in seen:
             seen.add(line)
             out.append(line)
+    total = len(out)
+    out = out[start:]
+    audit.set_meta(iid, "slack_steps_posted", total)
     if len(out) > limit:
         out = out[:limit] + [f"… and {len(out) - limit} more steps (see the audit log)."]
     return out
@@ -160,12 +165,12 @@ def incident_overview(report: dict) -> list[dict]:
     return blocks
 
 
-def findings_blocks(report: dict, steps: list[str]) -> list[dict]:
+def findings_blocks(report: dict, steps: list[str], title_checked: str = "What I checked") -> list[dict]:
     rc = report.get("root_cause") or {}
     blocks = []
     if steps:
-        blocks.append(_section("What I checked", _bullets(steps)))
-    ev = [ste(e.get("finding"), 1) for e in (report.get("evidence") or [])[:6]]
+        blocks.append(_section(title_checked, _bullets(steps)))
+    ev = [ste(e.get("finding"), 1, 18) for e in (report.get("evidence") or [])[:6]]
     if ev:
         blocks.append(_section("What I found", _bullets(ev)))
     cause = (f"`{rc.get('category', '?')}` on *{rc.get('resource', '?')}* (confidence: {rc.get('confidence', '?')}).\n"
@@ -187,7 +192,7 @@ def plan_message(iid: str, report: dict, rec: dict, steps: list[str], mention: s
     blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": f"{lead}{ste(report.get('summary'), 2)}"}})
     if not in_thread:
         blocks += incident_overview(report)
-    blocks += findings_blocks(report, steps)
+    blocks += findings_blocks(report, steps, "What I checked" if not in_thread else "New checks since the last message")
     plan = [f"*{action_txt}*", EFFECT.get(j.get("expected_effect"), ""),
             f"Why: {ste(j.get('reason'), 2)}", f"Risk: {ste(j.get('risk'), 2)}", f"Rollback: {ste(j.get('rollback'), 2)}"]
     blocks.append(_section("Plan", "\n".join(l for l in plan if l and not l.endswith(": "))))
@@ -225,7 +230,7 @@ def report_message(iid: str, report: dict, steps: list[str], needs_human: bool, 
     blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": f"{lead}{ste(report.get('summary'), 2)}"}})
     if not in_thread:
         blocks += incident_overview(report)
-    blocks += findings_blocks(report, steps)
+    blocks += findings_blocks(report, steps, "What I checked" if not in_thread else "New checks since the last message")
     recs = [f"{'[manual] ' if r.get('type') == 'manual' else ''}{ste(r.get('description'), 2)}"
             for r in (report.get("recommendations") or [])[:5]]
     if recs:
@@ -251,14 +256,8 @@ def execution_message(action_txt: str, ex: dict) -> dict:
         if v:
             status = {"resolved": "RESOLVED", "partially_resolved": "PARTLY RESOLVED", "unresolved": "NOT RESOLVED"}.get(v.get("status"), str(v.get("status")).upper())
             lines.append(f"*Verification: {status}.* {v.get('passed')} of {v.get('total')} checks passed.")
-            for d in (v.get("details") or "").splitlines()[:5]:
-                m = re.match(r"- \[(PASS|FAIL)\] (\S+) (\{.*?\}) expect=", d)
-                if m:
-                    try:
-                        args = json.loads(m.group(3).replace("'", '"').replace("True", "true").replace("False", "false").replace("None", "null"))
-                    except json.JSONDecodeError:
-                        args = {}
-                    lines.append(f"• {m.group(1)}: {describe_tool_call(m.group(2), args)}")
+            for c in (v.get("checks") or [])[:6]:
+                lines.append(f"• {'PASS' if c.get('passed') else 'FAIL'}: {describe_check(c)}")
     return {"text": "\n".join(lines)[:MAX_SECTION]}
 
 
@@ -315,8 +314,8 @@ class SlackNotifier:
 
     def post_plan(self, iid: str, report: dict, rec: dict) -> None:
         sev = (report.get("severity") or {}).get("level") or (rec.get("justification") or {}).get("severity") or "P1"
-        steps = steps_from_audit(self.audit, iid)
         existing = self.audit.get_meta(iid, "slack_thread")
+        steps = steps_from_audit(self.audit, iid, only_new=bool(existing))
         payload = plan_message(iid, report, rec, steps, self._mention(sev), self._approvers(sev), in_thread=bool(existing))
         if existing:
             ch, ts = self._send(existing["channel"], payload, existing["ts"])
@@ -326,8 +325,8 @@ class SlackNotifier:
 
     def post_report(self, iid: str, report: dict, needs_human: bool) -> None:
         sev = (report.get("severity") or {}).get("level", "P1")
-        steps = steps_from_audit(self.audit, iid)
         existing = self.audit.get_meta(iid, "slack_thread")
+        steps = steps_from_audit(self.audit, iid, only_new=bool(existing))
         payload = report_message(iid, report, steps, needs_human, self._mention(sev), in_thread=bool(existing))
         if existing:
             self._send(existing["channel"], payload, existing["ts"])

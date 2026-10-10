@@ -9,6 +9,7 @@ from __future__ import annotations
 import contextlib
 import contextvars
 import json
+import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -240,6 +241,16 @@ class Agent:
                 return {"type": "tool_result", "tool_use_id": block.id, "is_error": True,
                         "content": "POLICY NOT_A_FIX: propose only an action that removes the root cause or safely restores service. "
                                    "Put manual or follow-up steps in the report recommendations."}
+            urls = re.findall(r"https?://[^\s'\"<>]+", (self.audit.incident(iid) or {}).get("symptom", ""))
+            checks = args.get("verification") or []
+            if urls and not any(c.get("tool") in ("net_http_check", "net_trace_path") for c in checks):
+                stats.policy_denials += 1
+                self.audit.log("proposal_rejected", {"action": args.get("action"), "reason": "VERIFICATION_MISSES_SYMPTOM"}, iid)
+                self.on_event("tool_denied", {"tool": "propose_action", "code": "VERIFICATION_MISSES_SYMPTOM",
+                                              "reason": f"no check repeats the failing request to {urls[0]}"})
+                return {"type": "tool_result", "tool_use_id": block.id, "is_error": True,
+                        "content": f"POLICY VERIFICATION_MISSES_SYMPTOM: add a verification check that repeats the failing "
+                                   f"request (net_http_check or net_trace_path on {urls[0].rstrip('.,')}), then propose again."}
             with _trace("policy.propose", "GUARDRAIL", action=args.get("action")):
                 justification = {k: args.get(k) for k in ("root_cause_category", "severity", "expected_effect", "reason", "expected_impact", "risk", "preconditions", "rollback", "verification")}
                 dec = self.policy.propose(iid, args.get("action", ""), args.get("params") or {}, justification)
