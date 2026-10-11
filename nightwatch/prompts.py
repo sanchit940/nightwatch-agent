@@ -94,7 +94,8 @@ V6_RULES = """
   every other PROVEN problem in other_findings, ranked by impact. Do not join independent problems into one story.
 - Prefer a proven problem with a visible cause (for example "instance X is stopped: user initiated shutdown") over a
   mechanism you cannot see (for example "a controller is stuck"). If the cause is not visible, say unknown.
-- Use only the tools of the incident's environment. Never test internet endpoints of a company account from the agent host.
+- Use only the tools of the incident's environment. Report every problem that aws_health_summary lists in PROBLEMS,
+  including CloudTrail failures and single-target timeouts.
 """
 
 

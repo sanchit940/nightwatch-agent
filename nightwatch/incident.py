@@ -195,7 +195,8 @@ class IncidentRunner:
 
     # ----- environment binding -----
     ENV_CONNECTORS = {
-        "aws": {"aws", "network", "knowledge"},
+        # No network tools: private VPC addresses are not reachable from the agent host (run 2: 7 timeouts, about 35 s).
+        "aws": {"aws", "knowledge"},
         "lab": {"docker", "kubernetes", "linux", "network", "monitoring", "grafana", "loki", "knowledge"},
         "ai-agent": {"neatlogs", "network", "knowledge"},
     }
