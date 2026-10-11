@@ -130,11 +130,21 @@
 
 ## Demo
 
-- Not available yet.
+- Script: `docs/demo-script.md` (watch mode → investigation → Slack approval with an instruction → verification → neatlogs, Entire, cfo.ai).
+- Reproduce: `bash lab/compose/up.sh`, `bash lab/k8s/up.sh`, `nightwatch watch --approval slack`, then `bash lab/faults/fault.sh redis-down inject`.
+- Video link: pending.
 
 ## Known limitations and next steps
 
-- Not available yet.
+- Evaluated on 12 (+2 VM) known lab faults, one run each; the same scenarios were used to find and fix problems. Next: held-out scenarios and repeated runs.
+- One incident at a time (the watch loop waits for the incident). Next: an incident queue with workers.
+- The causal guard still rejects about 2 reports per incident (the model paraphrases evidence); costs about $0.01–0.02 extra.
+- An incident is not yet bound to one environment (one v5 run proposed a Kubernetes rollback for a Docker fault).
+- AWS, neatlogs-read and SSH connectors are read-only; there are no cloud change actions yet. Azure, GCP, CI/CD, PagerDuty: not built.
+- The approval secret is in the same process as the orchestrator. Next: a separate policy service process.
+- neatlogs shows 0 tokens and $0 for traces sent through the LiteLLM proxy; measured costs come from the proxy.
+- Slack app-level tokens rotate and expire; the operator must refresh them.
+- Next product steps (planned, not built): RAG over past incidents and runbooks; control plane + customer-side agent; SSO; web UI; billing.
 
 ## Submission
 
@@ -154,16 +164,18 @@
 - Submit on X: quote the official neatlogs post with team name, project name, public repository and demo.
 - Submission window: Monday 2026-10-12, 19:00–23:55 IST.
 
-**Outstanding items**
+**Outstanding items** (status 2026-10-11 evening; checklist with links: `docs/SUBMISSION.md`)
 
-- [ ] Team names or handles.
-- [ ] neatlogs account and `NEATLOGS_API_KEY` (builder).
-- [ ] Anthropic API key in `.env` (builder).
-- [ ] cfo.ai sign-up at cfo.ai/neathacks; cancel the subscription in Settings → Billing (builder).
-- [ ] Entire login and repository mirror (builder).
-- [ ] Public GitHub repository (builder approves).
-- [ ] Demo video. Length and format: not announced.
-- [ ] Building-in-public posts with #neatHack.
+- [ ] Team names or handles (builder).
+- [x] neatlogs account, ingest key and read token.
+- [x] LLM access: neatHack LiteLLM key (no direct Anthropic key).
+- [x] cfo.ai sign-up; subscription cancelled (builder). [ ] cfo.ai model built from `business/cfo-plan-inputs.md` and exported (builder).
+- [x] Entire login. Mirror: not used (transcripts private).
+- [x] Public GitHub repository: https://github.com/sanchit940/nightwatch-agent
+- [ ] neatlogs screenshots of the key traces in `docs/neatlogs-evidence.md` (builder).
+- [ ] Demo video (length and format not announced).
+- [ ] Building-in-public posts with #neatHack (drafts in `docs/posts.md`).
+- [ ] Final cutoff time: announced on Discord (check on Monday). Submissions: "opening soon" (checked 2026-10-11).
 - [ ] Rules on pre-hackathon work, team size, conduct: not visible on the page — check with the organizers.
 
 ### 2026-10-10 (evening) — Slack approvals

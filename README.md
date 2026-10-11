@@ -7,6 +7,9 @@ Then it verifies the result.
 
 Built for [neatHack](https://neatlogs.com/hackathon) (October 2026) with neatlogs, Entire and cfo.ai.
 
+**Judges:** start with [`docs/SUBMISSION.md`](docs/SUBMISSION.md) (every required evidence item with links),
+then [`docs/eval-results.md`](docs/eval-results.md) (before/after numbers) and [`hackathon.md`](hackathon.md) (build log).
+
 ## Why
 
 On-call work at night is repetitive: collect data, compare with a healthy state, find the cause, apply a safe fix, verify.
