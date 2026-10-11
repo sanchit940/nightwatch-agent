@@ -25,7 +25,7 @@ def load_dotenv(path: Path = ROOT / ".env") -> None:
 
 @dataclass
 class Settings:
-    model: str = "claude-opus-4-8"
+    model: str = "claude-sonnet-5-5"   # direct Anthropic API; the neatHack proxy uses claude-haiku
     effort: str = "high"
     max_tokens: int = 32000
     policy_file: Path = ROOT / "policy.yaml"

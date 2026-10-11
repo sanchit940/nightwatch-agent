@@ -74,29 +74,42 @@ load balancer health, CloudWatch, CloudTrail, EKS, IAM simulation, Route 53, one
 GitHub Actions and GitLab CI behind one interface). Each incident is bound to one environment (lab, aws, ci, ai-agent). Unconfigured connectors are hidden from
 the model. Setup and safety notes: [`docs/connectors.md`](docs/connectors.md).
 
-## Quick start
+## Try it (bring your own key)
 
-Requirements: Docker Desktop, kind, kubectl, Python 3.10–3.13.
+NightWatch runs on your machine with **your own Anthropic API key**. Nothing goes to us. The lab breaks real
+containers on your machine; NightWatch finds the cause and asks you before it changes anything.
+
+Requirements: Docker Desktop, Python 3.10–3.13. For the Kubernetes lab also kind and kubectl. About 10 minutes.
 
 ```bash
+git clone https://github.com/sanchit940/nightwatch-agent && cd nightwatch-agent
 python3.13 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
-cp .env.example .env          # add ANTHROPIC_API_KEY (or the neatHack LiteLLM key + NIGHTWATCH_LLM_BASE_URL) and NEATLOGS_API_KEY
-bash lab/compose/up.sh        # Docker lab on http://localhost:8080
-bash lab/k8s/up.sh            # kind lab on http://localhost:8081
+cp .env.example .env          # set ANTHROPIC_API_KEY (your key). Optional: NIGHTWATCH_MODEL, NEATLOGS_API_KEY
 pytest -q tests               # safety tests, no API key needed
+bash lab/compose/up.sh        # Docker lab on http://localhost:8080
 ```
 
-Run:
+Break something and let NightWatch investigate:
+
+```bash
+bash lab/faults/fault.sh redis-down inject
+nightwatch investigate "Users get 503 errors on http://localhost:8080"   # it asks you before any change
+bash lab/reset_all.sh
+```
+
+- Model: `NIGHTWATCH_MODEL` (default `claude-sonnet-5-5`; `claude-haiku-5-5` costs less). If the model does not support adaptive thinking, NightWatch continues without it.
+- One lab incident with `claude-haiku` cost about $0.03–0.10 in our runs.
+- Traces: set `NEATLOGS_API_KEY` to see every model call, tool call and policy decision in neatlogs. Without it, nothing is exported.
+- Kubernetes lab: `bash lab/k8s/up.sh` (http://localhost:8081). Other faults: `bash lab/faults/list.sh`.
+
+More commands:
 
 ```bash
 nightwatch check                                                     # one watch round, no LLM
-bash lab/faults/fault.sh redis-down inject                           # break something real
-nightwatch investigate "Users get 503 errors on http://localhost:8080"
 nightwatch watch                                                     # unattended mode
 nightwatch approvals && nightwatch approve <id>                      # in a second terminal
 nightwatch audit --verify                                            # check the audit chain
-bash lab/reset_all.sh
 ```
 
 ## Slack approvals

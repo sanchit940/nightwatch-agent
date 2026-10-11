@@ -248,6 +248,7 @@ class Agent:
         client = anthropic.Anthropic(max_retries=2, timeout=180.0, base_url=settings.llm_base_url or "https://api.anthropic.com", **kw)
         self.client = neatlogs.wrap(client, agent="nightwatch", prompt_version=settings.prompt_version) if neatlogs and settings.neatlogs_api_key else client
         self.system = system_prompt(settings.prompt_version)
+        self._thinking = True                  # adaptive thinking + effort; off if the model rejects them
         from .connectors import enabled_tools
         self._enabled = enabled_tools()
         self.scope: set[str] | None = None     # connectors allowed for the current incident (environment binding)
@@ -354,19 +355,26 @@ class Agent:
         for attempt in range(1, attempts + 1):
             start = time.monotonic()
             try:
+                extra = {"thinking": {"type": "adaptive"}, "output_config": {"effort": self.s.effort}} if self._thinking else {}
                 with self.client.messages.stream(
                     model=self.s.model,
                     max_tokens=self.s.max_tokens,
                     system=[{"type": "text", "text": self.system, "cache_control": {"type": "ephemeral"}}],
                     tools=self.tools,
                     messages=_with_tail_breakpoint(messages),
-                    thinking={"type": "adaptive"},
-                    output_config={"effort": self.s.effort},
+                    **extra,
                 ) as stream:
                     for _event in stream:
                         if time.monotonic() - start > deadline_s:
                             raise TimeoutError(f"model call exceeded {deadline_s:.0f} s")
                     return stream.get_final_message()
+            except anthropic.BadRequestError as e:
+                # Bring your own key: the chosen model can lack adaptive thinking or effort. Continue without them.
+                if self._thinking and any(w in str(e).lower() for w in ("thinking", "effort", "output_config")):
+                    self._thinking = False
+                    self.audit.log("llm_feature_off", {"model": self.s.model, "error": str(e)[:200]}, iid)
+                    return self._call_model(messages, iid, deadline_s, attempts)
+                raise
             except (TimeoutError, anthropic.APIConnectionError, anthropic.APITimeoutError, anthropic.InternalServerError) as e:
                 self.audit.log("llm_call_failed", {"attempt": attempt, "error": f"{type(e).__name__}: {str(e)[:200]}",
                                                    "seconds": round(time.monotonic() - start, 1)}, iid)

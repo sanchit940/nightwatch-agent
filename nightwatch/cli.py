@@ -117,6 +117,12 @@ def build_slack(s: Settings, audit: Audit, policy: Policy):
     return notifier, handler
 
 
+def require_llm_key(s: Settings) -> None:
+    if not s.llm_api_key:
+        raise SystemExit("Set ANTHROPIC_API_KEY in .env: NightWatch uses your own key (bring your own key). "
+                         "Get one at https://console.anthropic.com. Optional: NIGHTWATCH_MODEL (default claude-sonnet-5-5).")
+
+
 def build(s: Settings):
     audit = Audit(s.audit_db)
     policy = Policy(s.policy_file, audit, s.approval_secret)
@@ -124,6 +130,7 @@ def build(s: Settings):
 
 
 def cmd_investigate(a, s: Settings) -> int:
+    require_llm_key(s)
     from .incident import IncidentRunner, make_approver
     audit, policy = build(s)
     init_tracing(s, "nightwatch-investigate")
@@ -152,6 +159,7 @@ def cmd_investigate(a, s: Settings) -> int:
 
 
 def cmd_watch(a, s: Settings) -> int:
+    require_llm_key(s)
     from .incident import IncidentRunner, make_approver
     from .watch import Finding, run_watch
     audit, policy = build(s)
