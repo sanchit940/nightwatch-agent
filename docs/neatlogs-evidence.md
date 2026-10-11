@@ -18,5 +18,5 @@ Traces since 2026-10-10 by workflow: `nightwatch-eval-v1` 12, `nightwatch-eval-v
 | Recovery: stale approval | `inc-20261010-184058-8977` | `2991d1eacab59f586f926477e9a3e3d2`, `bb5c95391fa3cae526a36a31e5e9caf0` | model:claude-haiku,prompt:v5 | approved action refused (STALE_STATE); agent re-tested and reported |
 | Slack approval (live) | `inc-20261011-113552-f3e8` | `63aa6e6e100ab6fc3b54376310504618`, `1088deaccaa555ab81b744dcdedbf74d` | model:claude-haiku,prompt:v5 | plan in Slack → human approved → executed → verified resolved |
 
-Note: neatlogs shows 0 tokens and $0 for these traces: token usage is not reported through the LiteLLM proxy.
+Note: through the LiteLLM proxy, trace totals show 0 tokens and $0; each model span shows its own tokens and duration.
 Measured cost per incident is in `evals/results/*.json` (`measured_cost_usd`, from the proxy).

@@ -250,7 +250,7 @@
 **Builder decisions:** AWS on for the agent, **with masking**. The builder added a read-only IAM user (default profile) and a neatlogs service-account token.
 
 **Completed**
-- AWS identity check (local, no LLM): user `NightWatch-agent`, account matches `.env`. IAM simulation: terminate, stop, security-group ingress, create access key, delete object → `implicitDeny`. Note: `s3:GetObject` is allowed (broad `ReadOnlyAccess` policy); NightWatch does not call S3; the least-privilege policy is recommended.
+- AWS identity check (local, no LLM): a dedicated read-only IAM user, account matches `.env`. IAM simulation: terminate, stop, security-group ingress, create access key, delete object → `implicitDeny`. Note: `s3:GetObject` is allowed (broad `ReadOnlyAccess` policy); NightWatch does not call S3; the least-privilege policy is recommended.
 - Live AWS connector (counts only): 32 EC2 instances (25 running, 0 impaired), 12 load balancers, 0 alarms in ALARM, CloudTrail events OK.
 - Masking (`nightwatch/masking.py`): account IDs (also in ARNs), public IPs/CIDRs, IAM user names, role session names and e-mails become stable placeholders; placeholders in tool inputs are restored before the AWS call. Verified on live output: no account ID, public IP or e-mail. Tests: 33 passed.
 - neatlogs read: `400 VALIDATION_ERROR` until `NEATLOGS_PROJECT_ID` was the project **UUID** (found with `GET /projects`); page size max 50. NightWatch now reads its own 98 traces. Evidence page with trace IDs for the key runs: `docs/neatlogs-evidence.md`.
@@ -277,3 +277,14 @@
 - **cfo.ai forecast** (builder ran the prompt in Ari and exported `business/nightwatch-forecast-cfo-ai.xlsx`): base case break-even in month 7 (Apr 2027), gross margin 71%, lowest cash $3,117, cash $43,562 at month 18. Team at $19: break-even month 6. 50% bring-your-own-key: margin 77%. Slowdown to 30 new customers per month: cash below zero for 4 months. The base numbers match our own quick check exactly.
 - Checked before publishing: the workbook contains only NightWatch plan data (no e-mail, no bank or payment integration data).
 - Gap: the Downside case (15 new customers per month) is not in the export.
+
+### 2026-10-11 (night) — Real AWS account, measured with neatlogs
+
+- **Builder request:** investigate the real company AWS account (read-only user, masking on) and use neatlogs and Entire to find where the agent wastes time or claims things it cannot prove.
+- Ground truth first, without the model: 8 problems (stopped instances still behind the staging ALB, failing health checks, wrong HTTP codes, a timeout, a port mismatch, 255 empty target groups, 31 unattached volumes, one failed API call). Details, anonymized: `docs/aws-real-runs.md`.
+- **Finding: our tools cut output silently** (first 20 load balancers, 10 target groups each, first 50 volumes). Fixed: pagination or an explicit "showing N of M".
+- **neatlogs trace of run 1:** 20 model calls = 82% of 143 s; 15 guessed CloudTrail lookups; 4 calls to the lab; 2 rejected reports in the 3 longest model calls. Report: a guessed cause, confidence low; the biggest outage missed.
+- Fixes (Entire checkpoints `01M4NQZY0QQ05YVVDRD9NAXJ74`, `01M4NR5YXXFR5XKH44F5BND99F`, `01M4NRD5A3DT1N10SBGNT8JG08`): `aws_health_summary`; batched CloudTrail; environment binding (lab incidents cannot call AWS tools, AWS incidents cannot call lab tools); `other_findings`; prompt v6; no network tools for AWS; cheaper report rejections.
+- **Result run 1 → run 4:** problems found 3 → 6 of 8, time 146 s → 105 s, cost $0.20 → $0.05, tool calls 33 → 11, model calls 20 → 11, rejected reports 2 → 0. Tests: 42 passed (3 consecutive runs; one earlier flaky failure, probably the 3-second escalation test).
+- **Correction:** neatlogs records tokens and duration per model span; only the trace totals show 0 through the proxy. Docs updated.
+- **Privacy:** resource names are not masked. Some names identify customers of the company. They reached the LLM proxy and the private neatlogs project; they are not in the public repo. Open decision for the builder: mask resource names too.

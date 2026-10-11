@@ -50,3 +50,9 @@ Approve, Reject, or "Suggest another fix": your instruction cancels the plan, th
 
 In a live test our agent said a job restart on another server "caused" Redis to stop. Both happened at 10:20:44. Nothing else linked them.
 Now every causal link needs proof from a tool result, checked against a human-owned dependency map. Time correlation is not causation. #neatHack
+
+## Post 9 — a real AWS account, and what neatlogs showed
+
+We pointed NightWatch at a real (read-only, masked) AWS account. Run 1: the trace showed 82% of the time in 20 model calls,
+15 guessed CloudTrail lookups, and tools that cut their output without saying so. The agent missed the biggest outage.
+Four runs later: 6 of 8 problems found, 105 s instead of 146 s, $0.05 instead of $0.20. #neatHack
