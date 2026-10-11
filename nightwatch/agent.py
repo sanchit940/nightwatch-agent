@@ -169,8 +169,15 @@ def _with_tail_breakpoint(messages: list[dict]) -> list[dict]:
     return messages[:-1] + [{**last, "content": blocks}]
 
 
+OPTIONAL_LISTS = ("hypotheses", "known_unknowns", "recommendations")
+
+
 def validate_report(r: dict) -> list[str]:
-    """Deterministic check of submit_report input. Smaller models sometimes send partial or flattened reports."""
+    """Deterministic check of submit_report input. Smaller models sometimes send partial or flattened reports.
+    Missing list fields that carry no claim default to empty: a rejection costs a full model call (about 15-20 s)."""
+    for k in OPTIONAL_LISTS:
+        if k not in r:
+            r[k] = []
     errs = [f"missing field '{k}'" for k in REPORT_TOOL["input_schema"]["required"] if k not in r]
     rc = r.get("root_cause")
     if not isinstance(rc, dict):
@@ -411,7 +418,7 @@ class Agent:
                                    for e in self.audit.events(iid) if e["kind"] == "tool_call"]
                         outputs.append("@@ reported_symptom\n" + ((self.audit.incident(iid) or {}).get("symptom") or ""))
                         errs = check_chain(candidate.get("causal_chain") or [], outputs)
-                        if errs and stats.report_rejections >= 2:
+                        if errs and stats.report_rejections >= 1:
                             # No retry storm: accept, but never present an unproven link as fact.
                             good, bad = split_chain(candidate.get("causal_chain") or [], outputs)
                             candidate["causal_chain"] = good
