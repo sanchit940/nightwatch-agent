@@ -71,15 +71,27 @@ severity:
 # Slack routing and approvers per severity. Channel names or IDs. Approvers are Slack user IDs (U...).
 # An empty approver list means: any member of the channel can decide.
 slack:
+  # Builder decision 2026-10-11: one channel for all levels for now.
   channels:
-    P0: "#nightwatch-p0"
-    P1: "#nightwatch-alerts"
-    P2: "#nightwatch-alerts"
+    P0: "#nightwatch"
+    P1: "#nightwatch"
+    P2: "#nightwatch"
   mention:
     P0: "<!channel>"
     P1: "<!here>"
     P2: ""
+  # One approval from any listed approver is enough (no two-person rule).
+  # Slack member IDs (Profile -> ... -> Copy member ID). Empty = any channel member can decide.
   approvers:
     P0: []
     P1: []
     P2: []
+  # When nobody decides in time: remind at half of the time limit, then re-issue the plan and mention these
+  # contacts. They can also decide on an escalated plan. Empty list = mention the whole channel.
+  escalation:
+    remind_at_fraction: 0.5
+    max_levels: 2
+    contacts:
+      P0: []
+      P1: []
+      P2: []

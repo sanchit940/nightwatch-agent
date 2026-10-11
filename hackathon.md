@@ -192,3 +192,16 @@
 
 **Outstanding**
 - Builder: create the Slack app from `slack/manifest.yaml`, add tokens, create channels, set approver IDs.
+
+### 2026-10-11 — Slack decisions and escalation
+
+**Builder decisions:** approver lists per severity (IDs pending); one channel for all levels (`#nightwatch`); one approver is enough (no two-person rule); escalate when an approval expires. Severity floor rule: not decided.
+
+**Completed**
+- `policy.yaml`: single channel; `slack.escalation` (reminder at 50% of the time limit, max 2 levels, contacts per severity).
+- Reminder in the thread at half of the time limit, with the approver mentions.
+- At expiry: NightWatch re-reads the target state. Same state → it re-issues the plan as a new approval (new expiry) and mentions the escalation contacts, who may then decide too. Changed state → no re-issue; the agent investigates again. After the last level → "No change was made. A human must act."
+- Tests that ran: 24 passed. New: expiry → reminder → escalation → escalation contact approves → executed.
+- Failure found while testing: with a 1.5 s time limit, the escalated approval expired between the click and the runner's next poll (2 s), and the worker refused it (`STALE_APPROVAL`). This is correct behavior. The test now uses 3 s; real limits are 15–60 min.
+
+**Planned (not implemented): RAG and SaaS** — retrieval over past incidents, runbooks, change history and the service map (no fine-tuning); split into a hosted control plane and a customer-side agent; tenant isolation, SSO, web UI, incident queue, billing, shadow-mode onboarding.

@@ -42,7 +42,7 @@ def build_app(bot_token: str, make: Callable[[], tuple[Audit, Policy]], slack_cf
         if rec is None:
             return deny(respond, f"Approval {aid} does not exist.")
         sev = (rec.get("justification") or {}).get("severity")
-        if not policy.can_decide(user, sev):
+        if not policy.can_decide(user, sev, escalated=bool((rec.get("justification") or {}).get("escalation_level"))):
             return deny(respond, f"You are not an approver for {sev} incidents. No change was made.")
         d = policy.approve(aid, f"slack:{user}")
         iid = rec["incident_id"]
@@ -62,7 +62,7 @@ def build_app(bot_token: str, make: Callable[[], tuple[Audit, Policy]], slack_cf
         if rec is None:
             return deny(respond, f"Approval {aid} does not exist.")
         sev = (rec.get("justification") or {}).get("severity")
-        if not policy.can_decide(user, sev):
+        if not policy.can_decide(user, sev, escalated=bool((rec.get("justification") or {}).get("escalation_level"))):
             return deny(respond, f"You are not an approver for {sev} incidents.")
         d = policy.reject(aid, f"slack:{user}", "rejected in Slack")
         if d.allowed:

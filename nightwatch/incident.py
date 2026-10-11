@@ -54,6 +54,7 @@ class IncidentRunner:
         self.approver_name = approver_name
         self.notifier = notifier                 # SlackNotifier or None
         self.guidance_wait_s = guidance_wait_s   # how long to wait for a human instruction when no action can fix it
+        self._last_report: dict | None = None
 
     # ----- decisions -----
     def _take_guidance(self, iid: str, aid: str | None = None) -> list[dict]:
@@ -65,6 +66,7 @@ class IncidentRunner:
     def _decide(self, aid: str, iid: str) -> tuple[str, list[dict]]:
         """Final status of an approval request: approved / rejected / expired / pending / guidance (+ instructions)."""
         deadline = time.monotonic() + self.approval_wait_s
+        reminded = False
         while True:
             rec = self.audit.approval(aid)
             g = self._take_guidance(iid, aid)
@@ -81,6 +83,12 @@ class IncidentRunner:
                 self.policy.reject(aid, self.approver_name)
             if verdict is not None:
                 return self.audit.approval(aid)["status"], []
+            if self.notifier and not reminded:
+                frac = float(self.policy.escalation().get("remind_at_fraction", 0.5))
+                if time.time() >= rec["created_at"] + frac * (rec["expires_at"] - rec["created_at"]):
+                    reminded = True
+                    self._notify(iid, f"⏰ Reminder: plan `{aid}` waits for a decision. It expires at "
+                                      f"{time.strftime('%H:%M UTC', time.gmtime(rec['expires_at']))}. {self._approver_mentions(rec)}")
             if time.time() > rec["expires_at"]:
                 self.audit.update_approval(aid, status="expired")
                 self.audit.log("approval_expired", {"id": aid}, iid)
@@ -88,6 +96,43 @@ class IncidentRunner:
             if time.monotonic() > deadline:
                 return "pending", []
             time.sleep(2)
+
+    def _approver_mentions(self, rec: dict, escalated: bool = False) -> str:
+        sev = (rec.get("justification") or {}).get("severity") or "P1"
+        slack = self.policy.cfg.get("slack") or {}
+        people = list((slack.get("approvers") or {}).get(sev) or [])
+        if escalated:
+            people += ((slack.get("escalation") or {}).get("contacts") or {}).get(sev) or []
+        return " ".join(f"<@{u}>" for u in people) or ("<!channel>" if escalated else "")
+
+    def _escalate(self, iid: str, aid: str) -> str | None:
+        """Nobody decided in time. Re-issue the same plan (bound to the state NOW) and mention the escalation contacts.
+        Return the new approval id, or None when the incident must go back to the agent or to a human."""
+        from .connectors import ACTIONS
+        rec = self.audit.approval(aid)
+        j = dict(rec.get("justification") or {})
+        level = int(j.get("escalation_level", 0))
+        max_levels = int(self.policy.escalation().get("max_levels", 0))
+        if level >= max_levels:
+            self.notifier.close_buttons(iid, aid, "⌛ Expired without a decision. No change was made.")
+            self._notify(iid, f"⛔ No decision after {level} escalation(s). No change was made. A human must act. "
+                              f"{self._approver_mentions(rec, escalated=True)}")
+            return None
+        act = ACTIONS[rec["action"]]
+        current = act.fingerprint(act.params_model.model_validate(rec["params"]))
+        if current != rec["fingerprint"]:
+            self.notifier.close_buttons(iid, aid, "⌛ Expired. The target changed after the plan. NightWatch checks again.")
+            return None   # the round notes tell the agent to re-investigate
+        j["escalation_level"] = level + 1
+        d = self.policy.propose(iid, rec["action"], rec["params"], j)
+        if not d.allowed:
+            return None
+        self.audit.log("approval_escalated", {"expired": aid, "new": d.reason, "level": level + 1}, iid)
+        self.notifier.close_buttons(iid, aid, f"⌛ Expired without a decision. Escalated as plan `{d.reason}`.")
+        self._notify(iid, f"🚨 Escalation {level + 1} of {max_levels}: nobody decided on plan `{aid}` in time. "
+                          f"{self._approver_mentions(rec, escalated=True)} Please decide on the re-issued plan.")
+        self.notifier.post_plan(iid, self._last_report or {}, self.audit.approval(d.reason))
+        return d.reason
 
     def _wait_guidance(self, iid: str) -> list[dict]:
         deadline = time.monotonic() + self.guidance_wait_s
@@ -158,6 +203,7 @@ class IncidentRunner:
         now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         res: InvestigationResult = self.agent.run(iid, f"Incident {iid}. Current time {now}. Source: {source}.\nReported symptom: {symptom}")
         out = IncidentOutcome(iid, res.report, stats=res.stats, rounds=1)
+        self._last_report = out.report
         self._notify_round(iid, out.report, res.proposals)
         while out.rounds < max_rounds:
             pending = [a for a in res.proposals if self.audit.approval(a)["status"] in ("pending", "approved")]
@@ -167,6 +213,12 @@ class IncidentRunner:
             if pending:
                 for aid in pending:
                     status, g = self._decide(aid, iid)
+                    while status == "expired" and self.notifier:
+                        new_aid = self._escalate(iid, aid)
+                        if not new_aid:
+                            break
+                        aid = new_aid
+                        status, g = self._decide(aid, iid)
                     self.on_event("approval", {"id": aid, "status": status})
                     rec = self.audit.approval(aid)
                     self._announce_decision(iid, rec, status, g)
@@ -182,9 +234,8 @@ class IncidentRunner:
                     else:
                         notes.append(f"Approval {aid} is {status}. It was not executed.")
                         if self.notifier:
-                            if status == "expired":
-                                self.notifier.close_buttons(iid, aid, "⌛ The approval expired. No change was made.")
-                            self._notify(iid, f"Approval `{aid}` is {status}. No change was made.")
+                            if status != "expired":   # _escalate already reported the expiry
+                                self._notify(iid, f"Approval `{aid}` is {status}. No change was made.")
             elif self.notifier and self.guidance_wait_s > 0 and (out.report or {}).get("resolution") != "resolved":
                 guidance = self._wait_guidance(iid)
                 for g in guidance:
@@ -212,6 +263,7 @@ class IncidentRunner:
             out.report = res.report or out.report
             _merge(out.stats, res.stats)
             out.rounds += 1
+            self._last_report = out.report
             self._notify_round(iid, out.report, res.proposals)
         if out.status in ("investigated",) or out.executions:
             reported = (out.report or {}).get("resolution")

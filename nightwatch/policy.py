@@ -216,10 +216,17 @@ class Policy:
         return Decision(True, "AUTHORIZED", "", p)
 
     # ---------- people ----------
-    def can_decide(self, user_id: str, severity: str | None) -> bool:
-        """True when this Slack user may approve, reject or instruct for an incident of this severity."""
-        approvers = (((self.cfg.get("slack") or {}).get("approvers") or {}).get(severity or "P1")) or []
+    def can_decide(self, user_id: str, severity: str | None, escalated: bool = False) -> bool:
+        """True when this Slack user may approve, reject or instruct for an incident of this severity.
+        After an escalation, the escalation contacts of that severity may decide too."""
+        slack = self.cfg.get("slack") or {}
+        approvers = list(((slack.get("approvers") or {}).get(severity or "P1")) or [])
+        if escalated:
+            approvers += ((slack.get("escalation") or {}).get("contacts") or {}).get(severity or "P1") or []
         return not approvers or user_id in approvers
+
+    def escalation(self) -> dict:
+        return (self.cfg.get("slack") or {}).get("escalation") or {}
 
     def severity_definitions(self) -> dict[str, str]:
         return {k: v.get("definition", "") for k, v in (self.cfg.get("severity") or {}).items()}

@@ -91,11 +91,16 @@ bash lab/reset_all.sh
 
 NightWatch posts each incident to Slack as one thread, in the channel of its severity (`policy.yaml` → `severity`, `slack`).
 
-| Severity | Definition (owned by humans) | Approval time limit |
-|---|---|---|
-| P0 | Public entry point down, all requests fail, or data can be lost now | 15 min |
-| P1 | Users affected: some requests fail, high latency, critical dependency degraded | 30 min |
-| P2 | No user impact now: one component unhealthy, redundancy lost, a limit near | 60 min |
+| Severity | Definition (owned by humans) | Mention | Approval time limit |
+|---|---|---|---|
+| P0 | Public entry point down, all requests fail, or data can be lost now | @channel | 15 min |
+| P1 | Users affected: some requests fail, high latency, critical dependency degraded | @here | 30 min |
+| P2 | No user impact now: one component unhealthy, redundancy lost, a limit near | none | 60 min |
+
+All levels post to one channel (`#nightwatch`) for now. One approval from any listed approver is enough.
+When nobody decides: a reminder at half of the time limit; at expiry NightWatch re-reads the target state and
+re-issues the plan with a mention of the escalation contacts (max 2 levels). If the target changed, the agent
+investigates again instead.
 
 The plan message is written in ASD-STE100 short sentences: *What I checked*, *What I found*, *Cause*, *Symptoms, not causes*,
 *Plan* (action, effect, why, risk, rollback), *After the change, I will verify*, *Not known*. Buttons:
@@ -110,7 +115,7 @@ Only the approvers listed for that severity can decide. Setup:
 1. https://api.slack.com/apps → *Create New App* → *From a manifest* → paste [`slack/manifest.yaml`](slack/manifest.yaml).
 2. *Install to Workspace* → copy the **Bot User OAuth Token** (`xoxb-…`) to `SLACK_BOT_TOKEN` in `.env`.
 3. *Basic Information* → *App-Level Tokens* → create one with scope `connections:write` → copy `xapp-…` to `SLACK_APP_TOKEN`.
-4. Create the channels in `policy.yaml` (`#nightwatch-p0`, `#nightwatch-alerts`) and set `slack.approvers` (Slack user IDs).
+4. Create the channel `#nightwatch` and set `slack.approvers` and `slack.escalation.contacts` in `policy.yaml` (Slack member IDs).
 5. `nightwatch slack-test --severity P0`, then `nightwatch watch --approval slack`.
 
 Without tokens, `--approval slack` is a dry run: messages go to `runs/slack-outbox.jsonl`, and you decide with
