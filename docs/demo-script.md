@@ -26,7 +26,7 @@ Show: two rounds later, ONE incident opens for three symptoms.
 
 Terminal 1: tool calls (Docker, logs, Loki, Grafana alerts), the hypotheses table.
 Say: "It follows Brendan Gregg's method from Systems Performance: one hypothesis, one test. It has no shell.
-48 read-only tools. A policy service checks every call."
+53 read-only tools: Docker, Kubernetes, Linux, AWS, CI, Grafana, Loki. A policy service checks every call."
 
 ## 1:45 — Slack approval (60 s)
 
@@ -40,7 +40,7 @@ Show: "Done. Check: 3 of 3 passed." and "Resolved".
 ## 2:45 — Safety (20 s)
 
 Say: "The approval is signed and bound to the action, the target state and an expiry. A stale, changed, forged or replayed
-approval is refused. A restart cannot be proposed for a config fault. 41 tests prove these rules."
+approval is refused. A restart cannot be proposed for a config fault. 62 tests prove these rules."
 Optional: show the recovery run in `docs/eval-results.md`: an approval went stale and NightWatch refused it.
 
 ## 3:05 — neatlogs (25 s)
@@ -59,7 +59,12 @@ Say: "Every commit links to the agent session that wrote it. We publish summarie
 
 Show the cfo.ai model: pricing, cost per incident (measured: about $0.06 with Haiku), runway, break-even.
 
-## 3:55 — Close (5 s)
+## 3:55 — Your own cloud (10 s)
+
+Show `docs/self-host.md` or `deploy/aws/nightwatch.yaml`. Say: "It runs in your own account with your own key:
+one container, a read-only role, no inbound ports." Do NOT show the company AWS output.
+
+## 4:05 — Close (5 s)
 
 Say: "NightWatch: an on-call agent you can trust to run without you watching." Show the repo URL.
 
