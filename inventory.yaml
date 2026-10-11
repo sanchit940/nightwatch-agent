@@ -62,3 +62,12 @@ ssh_hosts:
     user: nightwatch
     key_file: lab/vm/keys/id_ed25519
     known_hosts: lab/vm/keys/known_hosts
+
+# CI/CD projects NightWatch may read (and re-run, if policy.yaml allows). Provider: github | gitlab | jenkins.
+ci_projects:
+  - provider: github
+    project: sanchit940/nightwatch-agent
+    role: NightWatch's own tests (workflow "tests"); lab fault input inject_failure
+  - provider: jenkins
+    project: nightwatch-lab-build
+    role: lab Jenkins freestyle job (local, port 8090); parameter FAULT

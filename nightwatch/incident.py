@@ -199,6 +199,7 @@ class IncidentRunner:
         "aws": {"aws", "knowledge"},
         "lab": {"docker", "kubernetes", "linux", "network", "monitoring", "grafana", "loki", "knowledge"},
         "ai-agent": {"neatlogs", "network", "knowledge"},
+        "ci": {"ci", "knowledge"},
     }
 
     @staticmethod
@@ -208,6 +209,8 @@ class IncidentRunner:
         if re.search(r"\b(aws|amazon|ec2|eks|alb|nlb|elb|cloudwatch|cloudtrail|rds|s3)\b|\b[a-z]{2}-(south|north|east|west|central|southeast|northeast)-\d\b", low) \
                 and not re.search(r"localhost|\bnw-|\blab\b(?! account)|kind-nightwatch", low.replace("not the local lab", "")):
             return "aws"
+        if re.search(r"\b(jenkins|github actions?|gitlab|pipeline|workflow run|ci/cd|ci job|build (is |has )?(fail|broken|red)|builds? fail)", low):
+            return "ci"
         if re.search(r"\b(ai agent|llm|trace|neatlogs)\b", low):
             return "ai-agent"
         return "lab"

@@ -106,6 +106,10 @@ def describe_tool_call(tool: str, a: dict, ok: bool | None = None, code: str | N
         "aws_eks_cluster": lambda: f"Read EKS cluster {a.get('cluster')}{result}.",
         "aws_iam_simulate": lambda: f"Simulated IAM permissions for {a.get('principal_arn')}{result}.",
         "aws_route53_records": lambda: f"Read DNS records for {a.get('name')}{result}.",
+        "aws_health_summary": lambda: f"Read the AWS health summary{result}.",
+        "ci_runs": lambda: f"Listed recent {a.get('provider')} runs of {a.get('project')}{result}.",
+        "ci_failure_logs": lambda: f"Read the failed jobs of {a.get('provider')} run {a.get('run_id')}{result}.",
+        "ci_compare_runs": lambda: f"Compared run {a.get('good_run_id')} (good) with run {a.get('bad_run_id')} (bad){result}.",
     }
     return m.get(tool, lambda: f"Ran {tool}{result}.")()
 
@@ -120,6 +124,7 @@ def describe_action(action: str, p: dict) -> str:
                                 + (f"revision {p['to_revision']}." if p.get("to_revision") else "the previous revision."),
         "rollout_restart": lambda: f"Restart all pods of deployment {p.get('namespace')}/{p.get('deployment')}, one by one.",
         "scale_deployment": lambda: f"Set deployment {p.get('namespace')}/{p.get('deployment')} to {p.get('replicas')} replicas.",
+        "ci_rerun_failed": lambda: f"Re-run the failed jobs of {p.get('provider')} run {p.get('run_id')} ({p.get('project')}).",
     }
     return m.get(action, lambda: f"Run {action} with {json.dumps(p)}.")()
 

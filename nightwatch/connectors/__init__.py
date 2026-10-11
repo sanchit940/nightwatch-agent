@@ -2,7 +2,7 @@
 
 import os
 
-from . import aws, docker, grafana, kubernetes, linux, monitoring, neatlogs_api, network  # noqa: F401
+from . import aws, ci, docker, grafana, kubernetes, linux, monitoring, neatlogs_api, network  # noqa: F401
 from .base import ACTIONS, TOOLS, RiskLevel  # noqa: F401
 
 # A connector without configuration is hidden from the model: no wasted calls, smaller prompt.

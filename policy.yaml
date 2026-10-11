@@ -15,6 +15,7 @@ scope:
     - "loki"
     - "neatlogs:*"
     - "aws:*"                   # read-only AWS calls with the NIGHTWATCH_AWS_PROFILE profile
+    - "ci:*"                    # Jenkins, GitHub Actions, GitLab CI (read)
     - "net:*"
     - "k8s:shop/*"
     - "k8s:_cluster/*"
@@ -25,6 +26,8 @@ scope:
     - "docker:container/nw-*"
     - "docker:network/nw-*"
     - "k8s:shop/deployments/*"
+    - "ci:github/sanchit940/nightwatch-agent"   # re-run failed CI jobs (approval needed)
+    - "ci:jenkins/nightwatch-lab-build"
   # Never touch these, even to read. Deny wins over allow.
   deny_targets:
     - "k8s:*/secrets/*"                  # a named secret: only the list (metadata) is readable
@@ -44,6 +47,7 @@ actions:
     - rollout_undo
     - rollout_restart
     - scale_deployment
+    - ci_rerun_failed
 
 # Fix compatibility (owned by humans): actions that cannot remove a cause of this category.
 # A restart, start or rollout-restart does not change configuration, environment, image or limits.
@@ -51,6 +55,8 @@ fix_compatibility:
   restart_container: &keeps_config [config_error, proxy_misconfig, image_pull_failure, probe_misconfig, scheduling_failure, certificate_error, permission_error]
   start_container: *keeps_config
   rollout_restart: *keeps_config
+  # A re-run changes no code, test or configuration: it fixes only transient failures.
+  ci_rerun_failed: [config_error, application_bug, build_failure, test_failure, permission_error, image_pull_failure, certificate_error]
 
 # Standing approvals written by a human for unattended operation (night mode).
 # Each rule is bounded by action, target pattern and rate. All disabled by default:

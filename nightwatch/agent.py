@@ -31,7 +31,8 @@ except ImportError:  # pragma: no cover
 ROOT_CAUSE_CATEGORIES = [
     "dependency_down", "proxy_misconfig", "memory_exhaustion", "cpu_saturation", "disk_full", "dns_failure",
     "network_partition", "config_error", "image_pull_failure", "probe_misconfig", "scheduling_failure",
-    "scaled_to_zero", "certificate_error", "permission_error", "application_bug", "other", "unknown",
+    "scaled_to_zero", "certificate_error", "permission_error", "application_bug",
+    "build_failure", "test_failure", "flaky_failure", "ci_infrastructure", "other", "unknown",
 ]
 
 
