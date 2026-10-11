@@ -31,3 +31,19 @@ def test_invented_quote_is_rejected():
 def test_unsupported_pairs_in_plan_reason():
     assert unsupported_pairs("Redis is exited because shop-worker service restart triggered container cleanup") == [("host:nw-vm", "nw-redis")]
     assert unsupported_pairs("nw-redis stopped, so nw-api fails and nw-web returns 503") == []
+
+
+def test_quote_matching_tolerates_json_escapes_and_line_breaks():
+    from nightwatch.causality import check_chain
+    stored = '{\n "op": "http",\n "ok": false,\n "status": 503,\n "body": "{\\"error\\": \\"backend unavailable\\"}"\n}'
+    chain = [{"cause": "nw-api", "effect": "nw-web returns 503", "evidence": '"status": 503, "body": "{"error": "backend unavailable"}"'}]
+    assert check_chain(chain, [stored]) == []
+
+
+def test_downgrade_keeps_proven_links_only():
+    from nightwatch.causality import split_chain
+    good, bad = split_chain([
+        {"cause": "nw-redis stopped", "effect": "nw-api cannot reach Redis", "evidence": "ERROR redis dns lookup failed host=redis"},
+        {"cause": "shop-worker restart on nw-vm", "effect": "nw-redis was stopped", "evidence": "2026-10-11T10:20:44Z\tcontainer\trestart\tnw-vm"}],
+        OUTPUTS)
+    assert len(good) == 1 and len(bad) == 1 and "shop-worker" in bad[0]["cause"]

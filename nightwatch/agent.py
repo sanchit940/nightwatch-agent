@@ -226,7 +226,9 @@ class Agent:
         self.audit = audit
         self.on_event = on_event or (lambda kind, data: None)
         kw = {"api_key": settings.llm_api_key} if settings.llm_api_key else {}
-        client = anthropic.Anthropic(max_retries=4, base_url=settings.llm_base_url or "https://api.anthropic.com", **kw)
+        # 180 s per call (also between stream chunks): a stalled proxy stream fails fast and is retried,
+        # instead of blocking the incident for the SDK default of 10 min x 5 attempts.
+        client = anthropic.Anthropic(max_retries=2, timeout=180.0, base_url=settings.llm_base_url or "https://api.anthropic.com", **kw)
         self.client = neatlogs.wrap(client, agent="nightwatch", prompt_version=settings.prompt_version) if neatlogs and settings.neatlogs_api_key else client
         self.system = system_prompt(settings.prompt_version)
         from .connectors import enabled_tools
@@ -361,12 +363,23 @@ class Agent:
                     candidate = dict(uses[i].input)
                     errs = validate_report(candidate)
                     if not errs:
-                        from .causality import check_chain
+                        from .causality import check_chain, split_chain
                         outputs = [e["payload"].get("output", "") for e in self.audit.events(iid) if e["kind"] == "tool_call"]
                         errs = check_chain(candidate.get("causal_chain") or [], outputs)
+                        if errs and stats.report_rejections >= 2:
+                            # No retry storm: accept, but never present an unproven link as fact.
+                            good, bad = split_chain(candidate.get("causal_chain") or [], outputs)
+                            candidate["causal_chain"] = good
+                            candidate["unproven_links"] = bad
+                            candidate.setdefault("known_unknowns", [])
+                            candidate["known_unknowns"] = list(candidate["known_unknowns"]) + [
+                                f"Not proven: {l.get('cause')} -> {l.get('effect')}" for l in bad]
+                            candidate["root_cause"] = {**candidate.get("root_cause", {}), "confidence": "low"}
+                            self.audit.log("report_downgraded", {"unproven_links": bad}, iid)
+                            errs = []
                     if errs:
                         stats.report_rejections += 1
-                        self.audit.log("report_rejected", {"errors": errs}, iid)
+                        self.audit.log("report_rejected", {"errors": errs, "causal_chain": candidate.get("causal_chain")}, iid)
                         self.on_event("tool_denied", {"tool": "submit_report", "code": "INVALID_REPORT", "reason": "; ".join(errs)})
                         results[i] = {"type": "tool_result", "tool_use_id": uses[i].id, "is_error": True,
                                       "content": "INVALID_REPORT: " + "; ".join(errs) + ". Send the COMPLETE report again with all required fields as structured JSON."}

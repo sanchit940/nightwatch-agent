@@ -97,29 +97,67 @@ def _norm(s: str) -> str:
     return re.sub(r"\s+", " ", (s or "").lower()).strip()
 
 
+def _loose(s: str) -> str:
+    """Letters and digits only: ignores JSON quotes, escapes, punctuation and line breaks."""
+    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9]+", " ", (s or "").lower())).strip()
+
+
+def _find(quote: str, outputs: list[str]) -> list[str]:
+    """For each tool output that contains the quote (compared loosely), return the loose text of exactly the
+    lines that the quote covers. Never a wider window: a neighbouring line of an event list is not evidence."""
+    q = _loose(quote)
+    if len(q) < 10:
+        return []
+    words = q.split()
+    candidates = [q] + ([" ".join(words[i:i + 6]) for i in range(0, len(words) - 5, 3)] if len(words) > 8 else [])
+    hits = []
+    for o in outputs:
+        lines = [_loose(l) for l in (o or "").splitlines()]
+        starts, pos = [], 0
+        for l in lines:
+            starts.append(pos)
+            pos += len(l) + 1
+        joined = " ".join(lines)
+        for c in candidates:
+            k = joined.find(c)
+            if k < 0:
+                continue
+            end = k + len(c)
+            covered = [lines[n] for n, st in enumerate(starts) if st <= end and st + len(lines[n]) >= k]
+            hits.append(" ".join(covered))
+            break
+    return hits
+
+
 def check_chain(chain: list[dict], outputs: list[str]) -> list[str]:
     """Return error messages for unsupported causal links. outputs = tool results of this incident."""
     errs = []
-    lines = [l for o in outputs for l in (o or "").splitlines()]
-    norm_lines = [_norm(l) for l in lines]
     for i, link in enumerate(chain or [], 1):
-        cause, effect, quote = link.get("cause", ""), link.get("effect", ""), _norm(link.get("evidence", ""))
-        if len(quote) < 12:
-            errs.append(f"causal_chain[{i}]: the evidence quote is too short (min 12 characters of a tool result)")
+        cause, effect, quote = link.get("cause", ""), link.get("effect", ""), link.get("evidence", "")
+        if len(_loose(quote)) < 10:
+            errs.append(f"causal_chain[{i}]: the evidence quote is too short (copy at least 12 characters of a tool result)")
             continue
-        hits = [l for l in norm_lines if quote in l or (len(quote) > 60 and quote[:60] in l)]
+        hits = _find(quote, outputs)
         if not hits:
             errs.append(f"causal_chain[{i}] {cause} -> {effect}: the evidence quote is not in any tool result of this incident")
             continue
         a, b = nodes_in(cause), nodes_in(effect)
         if a and b and any(connected(x, y) for x in a for y in b):
             continue
-        ta, tb = _tokens(cause), _tokens(effect)
-        if any(any(t in h for t in ta) and any(t in h for t in tb) for h in hits):
+        ta, tb = {_loose(t) for t in _tokens(cause)}, {_loose(t) for t in _tokens(effect)}
+        if any(any(t and t in h for t in ta) and any(t and t in h for t in tb) for h in hits):
             continue
-        errs.append(f"causal_chain[{i}] {cause} -> {effect}: no dependency in the inventory, and the quoted line does not name "
+        errs.append(f"causal_chain[{i}] {cause} -> {effect}: no dependency in the inventory, and the quoted text does not name "
                     "both. Time correlation is not causation. Remove this link, test it, or list it as an open hypothesis.")
     return errs
+
+
+def split_chain(chain: list[dict], outputs: list[str]) -> tuple[list[dict], list[dict]]:
+    """(proven links, unproven links). Used when the model cannot prove a link after retries."""
+    good, bad = [], []
+    for link in chain or []:
+        (bad if check_chain([link], outputs) else good).append(link)
+    return good, bad
 
 
 def unsupported_pairs(text: str) -> list[tuple[str, str]]:
