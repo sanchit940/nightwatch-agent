@@ -15,6 +15,8 @@ FAULTS=(
   "k8s-oom|k8s|api memory limit 20Mi (OOMKilled, CrashLoopBackOff)"
   "k8s-pending|k8s|api CPU request 4 x 3 replicas (Pending, FailedScheduling)"
   "k8s-redis-scaled-zero|k8s|deployment/redis scaled to 0"
+  "vm-service-crash|vm|bad value in shop-worker config on nw-vm (unit failed)"
+  "vm-disk-full|vm|Fill the 32m /var/lib/shop-worker disk on nw-vm (ENOSPC)"
 )
 printf '%-24s %-8s %s\n' ID LAB DESCRIPTION
 for f in "${FAULTS[@]}"; do

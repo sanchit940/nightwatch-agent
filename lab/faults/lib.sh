@@ -97,6 +97,32 @@ api_env() {
 # Recreate nw-api from the compose files (base + override) without touching other services.
 redeploy_api() { compose up -d --no-deps api >/dev/null 2>&1 || compose up -d --no-deps api; }
 
+# ---------- nw-vm helpers (systemd host) ----------
+# The fault scripts act as root through docker exec. The agent uses SSH as user nightwatch.
+
+VM=nw-vm
+
+require_vm() {
+  require_container "$VM"
+  container_running "$VM" || die "$VM is not running; start it with lab/vm/up.sh"
+}
+
+vm() { docker exec "$VM" "$@"; }
+
+# vm_unit_state <unit>: print the ActiveState of a unit (active, failed, activating, ...).
+vm_unit_state() { docker exec "$VM" systemctl show -p ActiveState --value "$1" 2>/dev/null || echo unknown; }
+
+# wait_vm_unit_state <unit> <state> [timeout_seconds]
+wait_vm_unit_state() {
+  local u="$1" want="$2" t="${3:-60}" i=0
+  while [ "$i" -lt "$t" ]; do
+    [ "$(vm_unit_state "$u")" = "$want" ] && return 0
+    sleep 1; i=$((i + 1))
+  done
+  log "WARN: $u not $want after ${t}s (state: $(vm_unit_state "$u"))"
+  return 1
+}
+
 # ---------- Kubernetes helpers ----------
 
 kc() { kubectl --context "$KUBE_CONTEXT" -n "$K8S_NS" "$@"; }

@@ -1,0 +1,67 @@
+#!/bin/bash
+# shop-worker: takes order events from the queue in batches and records its progress
+# in the state directory (state.log + checkpoint). Runs as shop-worker.service.
+set -u
+CONF=/etc/shop-worker/worker.conf
+
+QUEUE=orders
+BATCH_SIZE=50
+INTERVAL_SECONDS=5
+STATE_DIR=/var/lib/shop-worker
+
+err() { echo "<3>ERROR $*" >&2; }
+
+if [ ! -r "$CONF" ]; then
+  err "cannot read config file $CONF"
+  exit 78
+fi
+while IFS='=' read -r key value; do
+  case "$key" in
+    QUEUE) QUEUE="$value" ;;
+    BATCH_SIZE) BATCH_SIZE="$value" ;;
+    INTERVAL_SECONDS) INTERVAL_SECONDS="$value" ;;
+    STATE_DIR) STATE_DIR="$value" ;;
+  esac
+done < <(grep -E '^[A-Z_]+=' "$CONF")
+
+for k in BATCH_SIZE INTERVAL_SECONDS; do
+  v="${!k}"
+  if ! [[ "$v" =~ ^[1-9][0-9]*$ ]]; then
+    err "invalid value $k='$v' in $CONF: expected a positive integer"
+    err "configuration check failed, exiting"
+    exit 78
+  fi
+done
+if [ ! -d "$STATE_DIR" ] || [ ! -w "$STATE_DIR" ]; then
+  err "state directory $STATE_DIR does not exist or is not writable"
+  exit 73
+fi
+
+STATE_LOG="$STATE_DIR/state.log"
+CHECKPOINT="$STATE_DIR/checkpoint"
+processed=0
+if [ -r "$CHECKPOINT" ]; then
+  read -r processed < "$CHECKPOINT" || processed=0
+  [[ "$processed" =~ ^[0-9]+$ ]] || processed=0
+fi
+
+echo "shop-worker started queue=$QUEUE batch_size=$BATCH_SIZE interval=${INTERVAL_SECONDS}s state_dir=$STATE_DIR checkpoint=$processed"
+
+while true; do
+  batch=$(( (RANDOM % BATCH_SIZE) + 1 ))
+  next=$(( processed + batch ))
+  ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  # Rotate the state log at 1 MiB.
+  if [ -f "$STATE_LOG" ] && [ "$(stat -c %s "$STATE_LOG" 2>/dev/null || echo 0)" -gt 1048576 ]; then
+    mv -f "$STATE_LOG" "$STATE_LOG.1" 2>/dev/null || true
+  fi
+  if out="$( { printf '%s\n' "$next" > "$CHECKPOINT.tmp" && mv -f "$CHECKPOINT.tmp" "$CHECKPOINT"; } 2>&1 )" \
+     && out="$( { printf '%s queue=%s batch=%d processed_total=%d\n' "$ts" "$QUEUE" "$batch" "$next" >> "$STATE_LOG"; } 2>&1 )"; then
+    processed=$next
+    echo "heartbeat queue=$QUEUE batch=$batch processed_total=$processed"
+  else
+    rm -f "$CHECKPOINT.tmp" 2>/dev/null
+    err "state write failed dir=$STATE_DIR error=\"${out##*: }\"; batch of $batch events not committed, will retry"
+  fi
+  sleep "$INTERVAL_SECONDS"
+done

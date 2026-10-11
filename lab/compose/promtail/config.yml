@@ -1,0 +1,55 @@
+# Promtail for the NightWatch lab.
+# - docker: stdout/stderr of every container in compose project nightwatch-lab
+#   labels: container, service, project, stream
+# - journal: systemd journal of nw-vm (shared volume vm-journal)
+#   labels: host="nw-vm", unit, level, syslog_identifier, project
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+  log_level: warn
+
+positions:
+  filename: /var/lib/promtail/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  - job_name: docker
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 10s
+        filters:
+          - name: label
+            values: ["com.docker.compose.project=nightwatch-lab"]
+    relabel_configs:
+      - source_labels: [__meta_docker_container_name]
+        regex: /?(.*)
+        target_label: container
+      - source_labels: [__meta_docker_container_label_com_docker_compose_service]
+        target_label: service
+      - source_labels: [__meta_docker_container_label_com_docker_compose_project]
+        target_label: project
+      - source_labels: [__meta_docker_container_log_stream]
+        target_label: stream
+    pipeline_stages:
+      # On first start promtail reads the full docker log of each container. Keep only recent lines.
+      - drop:
+          older_than: 15m
+          drop_counter_reason: too_old
+
+  - job_name: journal
+    journal:
+      path: /var/log/journal
+      max_age: 1h
+      labels:
+        job: systemd-journal
+        host: nw-vm
+        project: nightwatch-lab
+    relabel_configs:
+      - source_labels: [__journal__systemd_unit]
+        target_label: unit
+      - source_labels: [__journal_priority_keyword]
+        target_label: level
+      - source_labels: [__journal_syslog_identifier]
+        target_label: syslog_identifier

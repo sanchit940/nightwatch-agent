@@ -1,0 +1,131 @@
+# Grafana-managed alert rules for the shop (folder "NightWatch").
+apiVersion: 1
+groups:
+  - orgId: 1
+    name: shop
+    folder: NightWatch
+    interval: 10s
+    rules:
+      - uid: shop-high-5xx
+        title: ShopHigh5xx
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: {from: 300, to: 0}
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: |
+                sum(rate(http_requests_total{job="api",path="/",code=~"5.."}[1m]))
+                  /
+                sum(rate(http_requests_total{job="api",path="/"}[1m]))
+              instant: true
+              range: false
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+              settings: {mode: dropNN}
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator: {type: gt, params: [0.05]}
+        noDataState: OK
+        execErrState: Error
+        for: 1m
+        labels:
+          severity: P1
+          service: shop
+        annotations:
+          summary: "Shop 5xx ratio is above 5%"
+          description: "More than 5% of GET / requests to the shop api return 5xx (1m rate)."
+
+      - uid: shop-high-latency
+        title: ShopHighLatency
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: {from: 300, to: 0}
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: |
+                histogram_quantile(0.95,
+                  sum by (le) (rate(http_request_duration_seconds_bucket{job="api",path="/"}[1m])))
+              instant: true
+              range: false
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+              settings: {mode: dropNN}
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator: {type: gt, params: [0.5]}
+        noDataState: OK
+        execErrState: Error
+        for: 1m
+        labels:
+          severity: P1
+          service: shop
+        annotations:
+          summary: "Shop p95 latency is above 0.5s"
+          description: "95th percentile latency of GET / on the shop api is above 500ms (1m rate)."
+
+      - uid: shop-error-logs
+        title: ShopErrorLogs
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: {from: 60, to: 0}
+            datasourceUid: loki
+            model:
+              refId: A
+              expr: 'sum(count_over_time({service="api"} |= "ERROR" [1m]))'
+              queryType: instant
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+              settings: {mode: dropNN}
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator: {type: gt, params: [20]}
+        noDataState: OK
+        execErrState: Error
+        for: 1m
+        labels:
+          severity: P2
+          service: shop
+        annotations:
+          summary: "Shop api logs more than 20 ERROR lines per minute"
+          description: "Loki: count_over_time({service=\"api\"} |= \"ERROR\" [1m]) > 20."

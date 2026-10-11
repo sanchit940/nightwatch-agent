@@ -1,0 +1,12 @@
+[Unit]
+Description=Install SSH host and user keys
+Before=ssh.service
+ConditionPathExists=/opt/provision/authorized_keys
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/install-ssh-keys
+
+[Install]
+WantedBy=multi-user.target

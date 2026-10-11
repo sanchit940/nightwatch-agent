@@ -84,8 +84,106 @@ services:
       - front
     restart: unless-stopped
 
+  loki:
+    image: grafana/loki:3.4.2
+    container_name: nw-loki
+    command: ["-config.file=/etc/loki/config.yml"]
+    environment:
+      GOMEMLIMIT: 150MiB
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./loki/config.yml:/etc/loki/config.yml:ro
+      - loki-data:/loki
+    mem_limit: 200m
+    memswap_limit: 200m
+    networks:
+      - front
+    restart: unless-stopped
+
+  promtail:
+    image: grafana/promtail:3.4.2
+    container_name: nw-promtail
+    command: ["-config.file=/etc/promtail/config.yml"]
+    environment:
+      GOMEMLIMIT: 75MiB
+    volumes:
+      - ./promtail/config.yml:/etc/promtail/config.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - vm-journal:/var/log/journal:ro
+      - promtail-data:/var/lib/promtail
+    mem_limit: 100m
+    memswap_limit: 100m
+    depends_on:
+      - loki
+    networks:
+      - front
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana-oss:11.5.2
+    container_name: nw-grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GF_SECURITY_ADMIN_PASSWORD:-nightwatch-lab}
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_AUTH_BASIC_ENABLED: "true"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: "false"
+      GF_NEWS_NEWS_FEED_ENABLED: "false"
+      GF_PLUGINS_PREINSTALL_DISABLED: "true"
+      GF_LOG_LEVEL: warn
+      GOMEMLIMIT: 160MiB
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/etc/grafana/dashboards:ro
+    mem_limit: 200m
+    memswap_limit: 200m
+    depends_on:
+      - prometheus
+      - loki
+    networks:
+      - front
+    restart: unless-stopped
+
+  # Small Linux host with systemd (PID 1), journald and sshd. SSH keys: lab/vm/keys.sh.
+  vm:
+    build:
+      context: ../vm
+    image: nightwatch-vm:lab
+    container_name: nw-vm
+    hostname: nw-vm
+    privileged: true
+    cgroup: private
+    stop_signal: SIGRTMIN+3
+    tmpfs:
+      - /run
+      - /run/lock
+      - /tmp
+      - /var/lib/shop-worker:size=32m,mode=0755
+    volumes:
+      - vm-journal:/var/log/journal
+      - ../vm/keys/id_ed25519.pub:/opt/provision/authorized_keys:ro
+      - ../vm/keys/ssh_host_ed25519_key:/opt/provision/ssh_host_ed25519_key:ro
+    ports:
+      - "2222:22"
+    mem_limit: 200m
+    memswap_limit: 200m
+    networks:
+      - front
+    restart: unless-stopped
+
 networks:
   front:
     name: nw-front
   back:
     name: nw-back
+
+volumes:
+  loki-data:
+  promtail-data:
+  vm-journal:

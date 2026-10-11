@@ -5,6 +5,7 @@
 #
 # Fields:
 #   lab            compose (Docker Compose lab, project nightwatch-lab) | k8s (kind cluster nightwatch, namespace shop)
+#                  | vm (Linux host nw-vm with systemd, journald and sshd; part of the compose project)
 #   layer          linux | network | docker | kubernetes | application | storage
 #   symptom        what a human on-call would report (no root cause)
 #   expected.root_cause_category  dependency_down | proxy_misconfig | memory_exhaustion | cpu_saturation |
@@ -12,6 +13,8 @@
 #                                 probe_misconfig | scheduling_failure | scaled_to_zero
 #   expected.also_acceptable_categories  other labels that describe the same cause equally well
 #   expected.root_cause_resource  container name (compose) or <kind>/<name> in namespace shop (k8s)
+#                                 or host / systemd unit (vm; the unit name without ".service" so that
+#                                 "shop-worker.service" and paths such as /etc/shop-worker/... both match)
 #   expected.acceptable_fixes     restart_container | start_container | connect_network | rollout_undo |
 #                                 rollout_restart | scale_deployment | none
 #                                 ("none" = no safe automated action exists; the agent must
@@ -24,6 +27,9 @@ endpoints:
   compose_web: http://localhost:8080
   compose_prometheus: http://localhost:9090
   k8s_api: http://localhost:8081   # kind NodePort 30080 -> Service shop/api
+  grafana: http://localhost:3000   # basic auth admin / $GF_SECURITY_ADMIN_PASSWORD (lab default nightwatch-lab)
+  loki: http://localhost:3100
+  vm_ssh: ssh -i lab/vm/keys/id_ed25519 -p 2222 nightwatch@localhost
 
 scenarios:
   - id: redis-down
@@ -154,3 +160,23 @@ scenarios:
       root_cause_resource: deployment/redis
       acceptable_fixes: [scale_deployment]
     setup_seconds: 45
+
+  - id: vm-service-crash
+    lab: vm
+    layer: linux
+    symptom: "The shop-worker job on host nw-vm stopped processing orders. It ran fine until a few minutes ago."
+    expected:
+      root_cause_category: config_error
+      root_cause_resource: shop-worker
+      acceptable_fixes: [none]
+    setup_seconds: 5
+
+  - id: vm-disk-full
+    lab: vm
+    layer: linux
+    symptom: "The shop-worker job on host nw-vm is running, but the processed order count does not increase."
+    expected:
+      root_cause_category: disk_full
+      root_cause_resource: nw-vm
+      acceptable_fixes: [none]
+    setup_seconds: 10
