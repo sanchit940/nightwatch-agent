@@ -129,10 +129,11 @@ REPORT_TOOL = {
                 "description": {"type": "string", "description": "One sentence, max 18 words"},
                 "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
                 "symptoms_not_causes": {"type": "array", "items": {"type": "string"}}}},
-            "causal_chain": {"type": "array", "minItems": 1, "description": (
-                "Links from the root cause to the user-facing symptom, in order. Each link needs an EXACT quote (min 12 "
-                "characters) from a tool result of this incident that shows the link. Two events at the same time are not "
-                "a link. NightWatch rejects a link between components with no dependency unless the quoted line names both."),
+            "causal_chain": {"type": "array", "minItems": 1, "maxItems": 4, "description": (
+                "1-4 links from the ROOT CAUSE to the USER-FACING SYMPTOM, in order. Not the fix, not the follow-up. "
+                "Each link needs evidence copied from ONE tool result line or ONE JSON result of this incident, with its "
+                "exact values (names, numbers, codes). Two events at the same time are not a link. NightWatch rejects a "
+                "link between components with no dependency unless that one line or result names both."),
                 "items": {"type": "object", "additionalProperties": False, "required": ["cause", "effect", "evidence"], "properties": {
                     "cause": {"type": "string"}, "effect": {"type": "string"},
                     "evidence": {"type": "string", "description": "Exact text copied from one tool result line"}}}},
@@ -383,7 +384,8 @@ class Agent:
                     errs = validate_report(candidate)
                     if not errs:
                         from .causality import check_chain, split_chain
-                        outputs = [e["payload"].get("output", "") for e in self.audit.events(iid) if e["kind"] == "tool_call"]
+                        outputs = [f"@@ {e['payload'].get('tool')} {json.dumps(e['payload'].get('args'), sort_keys=True)}\n{e['payload'].get('output', '')}"
+                                   for e in self.audit.events(iid) if e["kind"] == "tool_call"]
                         errs = check_chain(candidate.get("causal_chain") or [], outputs)
                         if errs and stats.report_rejections >= 2:
                             # No retry storm: accept, but never present an unproven link as fact.

@@ -102,30 +102,44 @@ def _loose(s: str) -> str:
     return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9]+", " ", (s or "").lower())).strip()
 
 
+def _records(output: str) -> list[str]:
+    """Evidence units. An optional first line "@@ <tool> <args>" names the tool call; it is added to every record.
+    One whole JSON result is one record; otherwise each line (log line, event) is one record."""
+    o = (output or "").strip()
+    head = ""
+    if o.startswith("@@ "):
+        head, _, o = o.partition("\n")
+        head, o = head[3:], o.strip()
+    if o.startswith(("{", "[")):
+        return [f"{head} {o}"]
+    return [f"{head} {l}" for l in o.splitlines() if l.strip()]
+
+
+def _distinct(text: str) -> set[str]:
+    """Specific values of a quote: numbers, IDs and names. Plain verbs and filler words do not count."""
+    toks = set()
+    for t in re.findall(r"[a-z0-9][a-z0-9_.:/=-]*[a-z0-9]|\d+", (text or "").lower()):
+        if t in STOP:
+            continue
+        if any(c.isdigit() for c in t) or any(c in t for c in "-_.:/="):
+            toks.add(t)
+    return toks
+
+
 def _find(quote: str, outputs: list[str]) -> list[str]:
-    """For each tool output that contains the quote (compared loosely), return the loose text of exactly the
-    lines that the quote covers. Never a wider window: a neighbouring line of an event list is not evidence."""
+    """Records (see _records) that support the quote: either the quote text itself (compared loosely), or ALL the
+    specific values of the quote (at least 3) inside ONE record. Values spread over two neighbouring event lines
+    never match: that is time correlation."""
     q = _loose(quote)
     if len(q) < 10:
         return []
-    words = q.split()
-    candidates = [q] + ([" ".join(words[i:i + 6]) for i in range(0, len(words) - 5, 3)] if len(words) > 8 else [])
+    want = {_loose(t) for t in _distinct(quote)}
     hits = []
     for o in outputs:
-        lines = [_loose(l) for l in (o or "").splitlines()]
-        starts, pos = [], 0
-        for l in lines:
-            starts.append(pos)
-            pos += len(l) + 1
-        joined = " ".join(lines)
-        for c in candidates:
-            k = joined.find(c)
-            if k < 0:
-                continue
-            end = k + len(c)
-            covered = [lines[n] for n, st in enumerate(starts) if st <= end and st + len(lines[n]) >= k]
-            hits.append(" ".join(covered))
-            break
+        for rec in _records(o):
+            lr = _loose(rec)
+            if q in lr or (len(want) >= 3 and all(w in lr for w in want)):
+                hits.append(lr)
     return hits
 
 

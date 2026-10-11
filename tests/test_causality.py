@@ -47,3 +47,13 @@ def test_downgrade_keeps_proven_links_only():
         {"cause": "shop-worker restart on nw-vm", "effect": "nw-redis was stopped", "evidence": "2026-10-11T10:20:44Z\tcontainer\trestart\tnw-vm"}],
         OUTPUTS)
     assert len(good) == 1 and len(bad) == 1 and "shop-worker" in bad[0]["cause"]
+
+
+def test_paraphrase_with_real_values_passes_but_invented_values_fail():
+    from nightwatch.causality import check_chain
+    out = '{\n "op": "http",\n "ok": true,\n "status": 200,\n "ms": 38.0,\n "body": "{\\"status\\": \\"ok\\"}"\n}'
+    ok = [{"cause": "nw-redis", "effect": "nw-api", "evidence": "GET http://api:8000/healthz returned status 200 in 38.0 ms, body status ok"}]
+    bad = [{"cause": "nw-redis", "effect": "nw-api", "evidence": "GET http://api:8000/healthz returned status 500 in 912 ms"}]
+    tagged = '@@ net_http_check {"source": "nw-toolbox", "url": "http://api:8000/healthz"}\n' + out
+    assert check_chain(ok, [tagged]) == []
+    assert check_chain(bad, [tagged])
