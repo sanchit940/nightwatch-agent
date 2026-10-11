@@ -2,6 +2,24 @@
 
 Drafts only. The builder posts them. Each post links the public repo.
 
+## Short plan: 3 posts (builder's choice)
+
+The builder can post 2–3 times. These 3 posts replace posts 1–10. Each is 280 characters or less (X counts a link as 23).
+
+### A — Sunday night (start)
+
+Building NightWatch for #neatHack: an AI on-call agent you can trust while you sleep. It finds the cause with evidence, then asks in Slack. It changes nothing without an approval bound to the exact change. Traces: @neatlogs. Provenance: @entireio. https://github.com/sanchit940/nightwatch-agent
+
+### B — Monday morning (numbers)
+
+12 real faults, measured with @neatlogs traces: correct fix decisions 8/12 → 11/12, 0 unauthorized changes in 60 runs, ~$0.06 per incident. On a real AWS account the trace showed 15 guessed lookups. After the fixes: 6 of 8 problems found, $0.20 → $0.05. #neatHack
+
+### C — Monday afternoon (with the video)
+
+Our agent blamed the wrong service: two events in the same second. Now every causal link needs proof from a tool result, or the report is rejected. It also reads CI now: Jenkins, GitHub Actions, GitLab. Demo: <video link> #neatHack
+
+## Long list (not used)
+
 ## Post 1 — start
 
 Building NightWatch for #neatHack: an AI on-call agent you can trust to run while you sleep.
