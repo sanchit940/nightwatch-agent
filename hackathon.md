@@ -169,7 +169,7 @@
 - [ ] Team names or handles (builder).
 - [x] neatlogs account, ingest key and read token.
 - [x] LLM access: neatHack LiteLLM key (no direct Anthropic key).
-- [x] cfo.ai sign-up; subscription cancelled (builder). [ ] cfo.ai model built from `business/cfo-plan-inputs.md` and exported (builder).
+- [x] cfo.ai sign-up; subscription cancelled (builder). [x] cfo.ai forecast built and exported (`business/nightwatch-forecast-cfo-ai.xlsx`, summary `business/cfo-forecast-summary.md`).
 - [x] Entire login. Mirror: not used (transcripts private).
 - [x] Public GitHub repository: https://github.com/sanchit940/nightwatch-agent
 - [ ] neatlogs screenshots of the key traces in `docs/neatlogs-evidence.md` (builder).
@@ -269,3 +269,11 @@
   - Fixes: evidence is matched per record (one log/event line, or one whole JSON result, tagged with tool name and arguments); a piece of evidence passes if its text or all its specific values (numbers, names, IDs) are in one record; the reported symptom counts as a source; the chain has max 4 links (root cause → symptom); the strict "dependency or one record names both" rule applies only when cause and effect name two different components; after 2 rejections the report is accepted with unproven links moved to "Not proven" and confidence "low".
   - Offline replay of the rejected chains of the last eval run: the honest chains now pass; the one wrong claim ("the restart caused Redis to lose its network", in dns-break) is still rejected. Tests: 41 passed.
 - Live confirmation (v5, `claude-haiku`, redis-down + dns-break, diagnosis mode, $0.17): both causal chains honest. dns-break chain now starts at "nw-redis disconnected from nw-back" (the false "restart" link is gone); one unprovable link was moved to "Not proven" with confidence low. No model hang. Remaining: 2 report rejections per incident (the agent still paraphrases some evidence; about $0.01–0.02 extra each); dns-break labeled `dependency_down` (resource correct).
+
+### 2026-10-11 (night) — Business plan with cfo.ai
+
+- **Builder decision:** prices must be very low ("$200 for a wrapper is not a good deal"). Customers bring their own model key or use ours; customers add their own data through a knowledge base (RAG).
+- New plan inputs (v2, `business/cfo-plan-inputs.md`): Community $0 (self-hosted), Starter $5, Team $15, Business $39 per environment per month; $0.12 per extra incident on our key (measured cost $0.06). No model training on customer data; RAG and learning from approvals instead.
+- **cfo.ai forecast** (builder ran the prompt in Ari and exported `business/nightwatch-forecast-cfo-ai.xlsx`): base case break-even in month 7 (Apr 2027), gross margin 71%, lowest cash $3,117, cash $43,562 at month 18. Team at $19: break-even month 6. 50% bring-your-own-key: margin 77%. Slowdown to 30 new customers per month: cash below zero for 4 months. The base numbers match our own quick check exactly.
+- Checked before publishing: the workbook contains only NightWatch plan data (no e-mail, no bank or payment integration data).
+- Gap: the Downside case (15 new customers per month) is not in the export.
