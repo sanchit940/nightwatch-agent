@@ -291,6 +291,9 @@ def cmd_tools(a, s: Settings) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    import faulthandler
+    import signal
+    faulthandler.register(signal.SIGUSR1)   # kill -USR1 <pid> prints where every thread waits (debugging hangs)
     p = argparse.ArgumentParser(prog="nightwatch")
     p.add_argument("--prompt", choices=["v1", "v2", "v3", "v4", "v5"], help="prompt version (default from env, v2)")
     p.add_argument("--model", help="override NIGHTWATCH_MODEL")

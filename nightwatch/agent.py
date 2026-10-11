@@ -316,6 +316,30 @@ class Agent:
             res["is_error"] = True
         return res
 
+    def _call_model(self, messages: list[dict], iid: str, deadline_s: float = 240, attempts: int = 2):
+        """One model call with a TOTAL time limit. The SDK timeout only measures silence between bytes, and a proxy
+        that keeps sending ping events never looks silent. Return the message, or None after the attempts fail."""
+        for attempt in range(1, attempts + 1):
+            start = time.monotonic()
+            try:
+                with self.client.messages.stream(
+                    model=self.s.model,
+                    max_tokens=self.s.max_tokens,
+                    system=[{"type": "text", "text": self.system, "cache_control": {"type": "ephemeral"}}],
+                    tools=self.tools,
+                    messages=_with_tail_breakpoint(messages),
+                    thinking={"type": "adaptive"},
+                    output_config={"effort": self.s.effort},
+                ) as stream:
+                    for _event in stream:
+                        if time.monotonic() - start > deadline_s:
+                            raise TimeoutError(f"model call exceeded {deadline_s:.0f} s")
+                    return stream.get_final_message()
+            except (TimeoutError, anthropic.APIConnectionError, anthropic.APITimeoutError, anthropic.InternalServerError) as e:
+                self.audit.log("llm_call_failed", {"attempt": attempt, "error": f"{type(e).__name__}: {str(e)[:200]}",
+                                                   "seconds": round(time.monotonic() - start, 1)}, iid)
+        return None
+
     # ----- the loop -----
     def run(self, iid: str, user_message: str, messages: list[dict] | None = None, max_turns: int = 30) -> InvestigationResult:
         stats = RunStats()
@@ -328,16 +352,11 @@ class Agent:
         root = _trace("investigation", "AGENT", session_id=iid, incident_id=iid, prompt_version=self.s.prompt_version, model=self.s.model)
         with root:
             for turn in range(max_turns):
-                with self.client.messages.stream(
-                    model=self.s.model,
-                    max_tokens=self.s.max_tokens,
-                    system=[{"type": "text", "text": self.system, "cache_control": {"type": "ephemeral"}}],
-                    tools=self.tools,
-                    messages=_with_tail_breakpoint(messages),
-                    thinking={"type": "adaptive"},
-                    output_config={"effort": self.s.effort},
-                ) as stream:
-                    resp = stream.get_final_message()
+                resp = self._call_model(messages, iid)
+                if resp is None:
+                    self.audit.log("llm_unavailable", {"turn": turn}, iid)
+                    self.on_event("thought", {"text": "The model did not answer in time (2 attempts). The investigation stops here."})
+                    break
                 stats.llm_calls += 1
                 u = resp.usage
                 stats.input_tokens += u.input_tokens

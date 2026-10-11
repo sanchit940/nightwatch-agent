@@ -102,3 +102,35 @@ def test_ste_and_plan_message_limits():
     assert "Roll back deployment shop/api to revision 4." in text and "(+2 more)" in text
     assert msg["blocks"][0]["text"]["text"].startswith("🟡 P2")
     assert len(text.splitlines()) <= 12 and len(text.split()) <= 140, text   # short main message
+
+
+def test_model_call_has_a_total_deadline(tmp_path):
+    """A proxy that keeps a stream open with ping events must not block an incident forever."""
+    from nightwatch.agent import Agent
+    from nightwatch.policy import Policy as P
+
+    class EndlessStream:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def __iter__(self):
+            while True:
+                time.sleep(0.01)
+                yield {"type": "ping"}
+
+    class FakeMessages:
+        def stream(self, **kw):
+            return EndlessStream()
+
+    s = Settings()
+    s.neatlogs_api_key, s.llm_api_key = "", "test"
+    audit = Audit(tmp_path / "a.db")
+    agent = Agent(s, P(ROOT / "policy.yaml", audit, "x"), audit)
+    agent.client = type("C", (), {"messages": FakeMessages()})()
+    t = time.monotonic()
+    assert agent._call_model([{"role": "user", "content": "x"}], "inc-1", deadline_s=0.2, attempts=2) is None
+    assert time.monotonic() - t < 2
+    assert sum(1 for e in audit.events() if e["kind"] == "llm_call_failed") == 2
