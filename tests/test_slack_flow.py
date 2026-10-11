@@ -79,7 +79,7 @@ def test_slack_guidance_then_approval_flow(tmp_path, monkeypatch):
     assert out.status == "resolved" and out.rounds == 3
     msgs = [json.loads(l) for l in outbox.read_text().splitlines()]
     posts = [m for m in msgs if m["method"] == "chat.postMessage"]
-    assert posts[0]["channel"] == "#nightwatch" and posts[0]["thread_ts"] is None   # single channel, thread start
+    assert posts[0]["channel"] == policy.cfg["slack"]["channels"]["P0"] and posts[0]["thread_ts"] is None   # P0 channel, thread start
     assert all(m["thread_ts"] == posts[0]["ts"] for m in posts[1:])                    # everything else in the thread
     texts = "\n".join(m.get("text", "") for m in posts)
     assert "Executed:* Start container nw-redis" in texts and "Incident status: ✅ RESOLVED" in texts

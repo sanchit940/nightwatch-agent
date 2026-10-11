@@ -42,6 +42,15 @@ class Budget:
     denied: int = 0
 
 
+def _merge(base: dict, over: dict) -> None:
+    """Deep-merge `over` into `base` (dicts merge, other values replace)."""
+    for k, v in over.items():
+        if isinstance(v, dict) and isinstance(base.get(k), dict):
+            _merge(base[k], v)
+        else:
+            base[k] = v
+
+
 def _canon(obj: Any) -> str:
     return json.dumps(obj, sort_keys=True, separators=(",", ":"), default=str)
 
@@ -49,6 +58,10 @@ def _canon(obj: Any) -> str:
 class Policy:
     def __init__(self, policy_file: Path, audit: Audit, secret: str):
         self.cfg = yaml.safe_load(Path(policy_file).read_text())
+        # Workspace-specific values (Slack channel and member IDs) live in a git-ignored local file.
+        local = Path(policy_file).with_name(Path(policy_file).stem + ".local.yaml")
+        if local.exists():
+            _merge(self.cfg, yaml.safe_load(local.read_text()) or {})
         self.audit = audit
         if not secret:
             # Ephemeral secret: approvals do not survive a restart. Set NIGHTWATCH_APPROVAL_SECRET in production.

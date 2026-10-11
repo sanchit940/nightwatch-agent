@@ -81,17 +81,18 @@ slack:
     P1: "<!here>"
     P2: ""
   # One approval from any listed approver is enough (no two-person rule).
+  # Put real channel and member IDs in policy.local.yaml (git-ignored); it overrides these values.
   # Slack member IDs (Profile -> ... -> Copy member ID). Empty = any channel member can decide.
   approvers:
-    P0: [U0ARVCKF1UY]
-    P1: [U0ARVCKF1UY]
-    P2: [U0ARVCKF1UY]
+    P0: []
+    P1: []
+    P2: []
   # When nobody decides in time: remind at half of the time limit, then re-issue the plan and mention these
   # contacts. They can also decide on an escalated plan. Empty list = mention the whole channel.
   escalation:
     remind_at_fraction: 0.5
     max_levels: 2
     contacts:
-      P0: [U0ARVCKF1UY]
-      P1: [U0ARVCKF1UY]
-      P2: [U0ARVCKF1UY]
+      P0: []
+      P1: []
+      P2: []
