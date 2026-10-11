@@ -100,7 +100,7 @@ def summarize(rows: list[dict]) -> dict:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--prompt", default="v2", choices=["v1", "v2", "v3", "v4", "v5"])
+    ap.add_argument("--prompt", default="v2", choices=["v1", "v2", "v3", "v4", "v5", "v6"])
     ap.add_argument("--mode", default="remediate", choices=["diagnose", "remediate"])
     ap.add_argument("--only", help="comma-separated scenario ids")
     ap.add_argument("--layer", help="only scenarios of this layer, e.g. kubernetes")

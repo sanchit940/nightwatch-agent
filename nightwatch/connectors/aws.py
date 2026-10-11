@@ -134,14 +134,15 @@ def aws_ebs_volumes(a: EbsArgs) -> ToolOutput:
             kw["VolumeIds"] = a.volume_ids
         if a.instance_id:
             kw["Filters"] = [{"Name": "attachment.instance-id", "Values": [a.instance_id]}]
-        vols = ec2.describe_volumes(**kw)["Volumes"][:50]
+        allv = [v for page in ec2.get_paginator("describe_volumes").paginate(**kw) for v in page["Volumes"]]
+        vols = allv[:50]
         st = {}
         if vols:
             for s in ec2.describe_volume_status(VolumeIds=[v["VolumeId"] for v in vols])["VolumeStatuses"]:
                 st[s["VolumeId"]] = {d["Name"]: d["Status"] for d in s.get("VolumeStatus", {}).get("Details", [])}
         return "\n".join(_j({"id": v["VolumeId"], "state": v["State"], "size_gib": v["Size"], "type": v["VolumeType"], "iops": v.get("Iops"),
                              "throughput": v.get("Throughput"), "attachments": [(x["InstanceId"], x["Device"], x["State"]) for x in v.get("Attachments", [])],
-                             "status": st.get(v["VolumeId"])}) for v in vols)
+                             "status": st.get(v["VolumeId"])}) for v in vols) + (f"\n[showing 50 of {len(allv)} volumes]" if len(allv) > 50 else "")
     return _run(go)
 
 
@@ -215,27 +216,39 @@ def aws_vpc_network(a: VpcArgs) -> ToolOutput:
 
 class ElbArgs(Args):
     region: REGION = None
-    name: str | None = Field(None, pattern=r"^[A-Za-z0-9-]{1,32}$", description="Load balancer name; omit to list all (max 20)")
+    name: str | None = Field(None, pattern=r"^[A-Za-z0-9-]{1,32}$", description="Load balancer name; omit for all")
+    problems_only: bool = Field(True, description="List only target groups with non-healthy or no targets; count the healthy ones")
 
 
-@tool("aws_elb_health", "Application/Network Load Balancers: state, scheme, listeners, and target health per target group (healthy/unhealthy with reason).",
-      ElbArgs, RiskLevel.READ, "aws", targets=lambda a: [f"aws:{a.region or 'default'}/elb"])
+@tool("aws_elb_health", "Load balancers: state, scheme, listeners, and target health per target group (unhealthy, unused, empty) with reason and health check. Lists problems first; says how many healthy groups are not listed.",
+      ElbArgs, RiskLevel.READ, "aws", timeout_s=60, targets=lambda a: [f"aws:{a.region or 'default'}/elb"])
 def aws_elb_health(a: ElbArgs) -> ToolOutput:
     def go():
         elb = _client("elbv2", a.region)
-        lbs = elb.describe_load_balancers(**({"Names": [a.name]} if a.name else {}))["LoadBalancers"][:20]
-        out = []
+        lbs = [lb for page in elb.get_paginator("describe_load_balancers").paginate(**({"Names": [a.name]} if a.name else {}))
+               for lb in page["LoadBalancers"]]
+        out, hidden = [], 0
         for lb in lbs:
             arn = lb["LoadBalancerArn"]
             listeners = [f"{l['Protocol']}:{l['Port']}" for l in elb.describe_listeners(LoadBalancerArn=arn)["Listeners"]]
-            tgs = []
-            for tg in elb.describe_target_groups(LoadBalancerArn=arn)["TargetGroups"][:10]:
+            tgs, ok_groups = [], 0
+            for tg in [t for p in elb.get_paginator("describe_target_groups").paginate(LoadBalancerArn=arn) for t in p["TargetGroups"]]:
                 th = elb.describe_target_health(TargetGroupArn=tg["TargetGroupArn"])["TargetHealthDescriptions"]
-                tgs.append({"target_group": tg["TargetGroupName"], "port": tg.get("Port"), "health_check": f"{tg.get('HealthCheckProtocol')}:{tg.get('HealthCheckPort')}{tg.get('HealthCheckPath') or ''}",
-                            "targets": [f"{t['Target']['Id']}:{t['Target'].get('Port')} {t['TargetHealth']['State']} {t['TargetHealth'].get('Reason') or ''}".strip() for t in th]})
+                healthy = th and all(t["TargetHealth"]["State"] == "healthy" for t in th)
+                if a.problems_only and healthy:
+                    ok_groups += 1
+                    continue
+                tgs.append({"target_group": tg["TargetGroupName"], "port": tg.get("Port"),
+                            "health_check": f"{tg.get('HealthCheckProtocol')}:{tg.get('HealthCheckPort')}{tg.get('HealthCheckPath') or ''}",
+                            "targets": [f"{t['Target']['Id']}:{t['Target'].get('Port')} {t['TargetHealth']['State']} {t['TargetHealth'].get('Reason') or ''}".strip()
+                                        for t in th] or ["(no targets registered)"]})
+            hidden += ok_groups
             out.append(_j({"lb": lb["LoadBalancerName"], "type": lb["Type"], "scheme": lb["Scheme"], "state": lb["State"]["Code"],
-                           "dns": lb["DNSName"], "listeners": listeners, "target_groups": tgs}))
-        return "\n".join(out)
+                           "dns": lb["DNSName"], "listeners": listeners, "healthy_target_groups_not_listed": ok_groups, "problem_target_groups": tgs}))
+        text = "\n".join(out)
+        if len(text) > 12000:
+            text = text[:12000] + f"\n[output cut at 12000 characters: {len(lbs)} load balancers in total; ask for one by name]"
+        return text + f"\n(load balancers: {len(lbs)}; healthy target groups not listed: {hidden})"
     return _run(go)
 
 
@@ -313,34 +326,146 @@ class TrailArgs(Args):
     region: REGION = None
     minutes: int = Field(180, ge=5, le=10080)
     resource_name: str | None = Field(None, max_length=200, description="For example an instance ID or security group ID")
-    event_name: str | None = Field(None, pattern=r"^[A-Za-z]{3,80}$", description="For example AuthorizeSecurityGroupIngress")
+    event_names: list[Annotated[str, Field(pattern=r"^[A-Za-z]{3,80}$")]] = Field(
+        default_factory=list, max_length=10, description="Up to 10 event names in ONE call, for example [StopInstances, ModifyTargetGroup]")
+    errors_only: bool = Field(False, description="Only calls that failed (errorCode set)")
     include_reads: bool = Field(False, description="Include read-only API calls (noisy)")
 
 
-@tool("aws_cloudtrail_events", "CloudTrail change history: who changed what and when (API calls by user/role), filtered by resource or event name. Use it to find the change near the incident start.",
-      TrailArgs, RiskLevel.READ, "aws", targets=lambda a: [f"aws:{a.region or 'default'}/cloudtrail"])
+@tool("aws_cloudtrail_events",
+      "CloudTrail change history: who changed what and when, and which API calls failed. Call it ONCE: without filters it "
+      "returns recent write events; give up to 10 event_names in one call. Do not guess event names one call at a time.",
+      TrailArgs, RiskLevel.READ, "aws", timeout_s=40, targets=lambda a: [f"aws:{a.region or 'default'}/cloudtrail"])
 def aws_cloudtrail_events(a: TrailArgs) -> ToolOutput:
     def go():
         import datetime as dt
         end = dt.datetime.now(dt.timezone.utc)
-        attrs = []
+        client = _client("cloudtrail", a.region)
         if a.resource_name:
-            attrs = [{"AttributeKey": "ResourceName", "AttributeValue": a.resource_name}]
-        elif a.event_name:
-            attrs = [{"AttributeKey": "EventName", "AttributeValue": a.event_name}]
+            queries = [[{"AttributeKey": "ResourceName", "AttributeValue": a.resource_name}]]
+        elif a.event_names:
+            queries = [[{"AttributeKey": "EventName", "AttributeValue": n}] for n in a.event_names]
         elif not a.include_reads:
-            attrs = [{"AttributeKey": "ReadOnly", "AttributeValue": "false"}]
-        ev = _client("cloudtrail", a.region).lookup_events(LookupAttributes=attrs, StartTime=end - dt.timedelta(minutes=a.minutes),
-                                                           EndTime=end, MaxResults=50)["Events"]
+            queries = [[{"AttributeKey": "ReadOnly", "AttributeValue": "false"}]]
+        else:
+            queries = [[]]
         rows = []
+        for attrs in queries:
+            ev = client.lookup_events(LookupAttributes=attrs, StartTime=end - dt.timedelta(minutes=a.minutes),
+                                      EndTime=end, MaxResults=50)["Events"]
+            for e in ev:
+                detail = json.loads(e.get("CloudTrailEvent") or "{}")
+                if not a.include_reads and detail.get("readOnly"):
+                    continue
+                if a.errors_only and not detail.get("errorCode"):
+                    continue
+                rows.append((e["EventTime"], _j({"time": _iso(e["EventTime"]), "event": e["EventName"], "user": e.get("Username"),
+                                                 "source_ip": detail.get("sourceIPAddress"), "error": detail.get("errorCode"),
+                                                 "resources": [r.get("ResourceName") for r in e.get("Resources", [])][:5]})))
+        rows.sort(key=lambda r: r[0], reverse=True)
+        if not rows:
+            return f"(no matching events in the last {a.minutes} min" + (f" for {a.event_names}" if a.event_names else "") + ")"
+        return "\n".join(r for _, r in rows[:80])
+    return _run(go)
+
+
+class HealthArgs(Args):
+    region: REGION = None
+    trail_hours: int = Field(24, ge=1, le=168, description="CloudTrail look-back for failed write calls")
+
+
+@tool("aws_health_summary",
+      "START HERE for any AWS account or service question. One call: instance states (stopped with reason, failed status "
+      "checks), load balancer target health per target group (unhealthy, unused targets resolved to their instance, empty "
+      "target groups), CloudWatch alarms in ALARM, unattached EBS volumes, and failed CloudTrail write calls. Problems first.",
+      HealthArgs, RiskLevel.READ, "aws", timeout_s=90, targets=lambda a: [f"aws:{a.region or 'default'}/summary"])
+def aws_health_summary(a: HealthArgs) -> ToolOutput:
+    def go():
+        import datetime as dt
+        ec2 = _client("ec2", a.region)
+        insts = {}
+        for r in ec2.describe_instances(MaxResults=1000)["Reservations"]:
+            for i in r["Instances"]:
+                insts[i["InstanceId"]] = i
+        status = {}
+        if insts:
+            ids = list(insts)
+            for k in range(0, len(ids), 100):
+                for st in ec2.describe_instance_status(InstanceIds=ids[k:k + 100], IncludeAllInstances=True)["InstanceStatuses"]:
+                    status[st["InstanceId"]] = (st.get("SystemStatus", {}).get("Status"), st.get("InstanceStatus", {}).get("Status"))
+        problems, info = [], []
+        states = {}
+        for iid, i in insts.items():
+            states[i["State"]["Name"]] = states.get(i["State"]["Name"], 0) + 1
+            s_sys, s_inst = status.get(iid, (None, None))
+            if s_sys not in (None, "ok", "not-applicable", "initializing") or s_inst not in (None, "ok", "not-applicable", "initializing"):
+                problems.append(f"EC2 {iid} ({_name(i.get('Tags'))}): status checks system={s_sys} instance={s_inst}")
+        info.append(f"EC2 instances: {states}")
+        # load balancers and target health
+        elb = _client("elbv2", a.region)
+        lbs = [lb for page in elb.get_paginator("describe_load_balancers").paginate() for lb in page["LoadBalancers"]]
+        empty, healthy_tgs, groups = [], 0, {}
+        for lb in lbs:
+            tgs = [tg for page in elb.get_paginator("describe_target_groups").paginate(LoadBalancerArn=lb["LoadBalancerArn"]) for tg in page["TargetGroups"]]
+            for tg in tgs:
+                th = elb.describe_target_health(TargetGroupArn=tg["TargetGroupArn"])["TargetHealthDescriptions"]
+                hc = f"{tg.get('HealthCheckProtocol')}:{tg.get('HealthCheckPort')}{tg.get('HealthCheckPath') or ''}"
+                if not th:
+                    empty.append(f"{lb['LoadBalancerName']}/{tg['TargetGroupName']}")
+                    continue
+                bad = [t for t in th if t["TargetHealth"]["State"] not in ("healthy",)]
+                if not bad:
+                    healthy_tgs += 1
+                    continue
+                for t in bad:
+                    tid, port = t["Target"]["Id"], t["Target"].get("Port")
+                    state, reason = t["TargetHealth"]["State"], t["TargetHealth"].get("Reason")
+                    who = tid if len(tid) < 40 else "…" + tid[-40:]
+                    if tid in insts:
+                        inst = insts[tid]
+                        who = f"instance {_name(inst.get('Tags'))} ({tid}, {inst['State']['Name']}"
+                        if inst["State"]["Name"] != "running":
+                            who += f": {(inst.get('StateReason') or {}).get('Message', '')}"
+                        who += ")"
+                    groups.setdefault((lb["LoadBalancerName"], who, state, reason), []).append(f"{tg['TargetGroupName']}:{port} [hc {hc}]")
+        for (lbn, who, state, reason), items in sorted(groups.items(), key=lambda kv: -len(kv[1])):
+            problems.append(f"{lbn}: {who} -> {len(items)} target group(s) {state} ({reason}): " + ", ".join(items[:6])
+                            + (f" … +{len(items) - 6} more" if len(items) > 6 else ""))
+        info.append(f"Load balancers: {len(lbs)}; target groups healthy: {healthy_tgs}; with no targets: {len(empty)}")
+        if empty:
+            info.append("Target groups with no targets (first 15): " + ", ".join(empty[:15]))
+        cw = _client("cloudwatch", a.region)
+        for al in cw.describe_alarms(StateValue="ALARM", MaxRecords=50)["MetricAlarms"]:
+            problems.append(f"Alarm {al['AlarmName']} in ALARM since {_iso(al.get('StateUpdatedTimestamp'))}: {(al.get('StateReason') or '')[:120]}")
+        vols = [v for page in ec2.get_paginator("describe_volumes").paginate(Filters=[{"Name": "status", "Values": ["available"]}]) for v in page["Volumes"]]
+        if vols:
+            gib = sum(v["Size"] for v in vols)
+            info.append(f"Unattached EBS volumes: {len(vols)} ({gib} GiB) — cost, not an outage")
+        end = dt.datetime.now(dt.timezone.utc)
+        ct = _client("cloudtrail", a.region)
+        ev, token = [], None
+        for _ in range(6):   # up to 300 write events
+            kw = dict(LookupAttributes=[{"AttributeKey": "ReadOnly", "AttributeValue": "false"}],
+                      StartTime=end - dt.timedelta(hours=a.trail_hours), EndTime=end, MaxResults=50)
+            if token:
+                kw["NextToken"] = token
+            page = ct.lookup_events(**kw)
+            ev += page["Events"]
+            token = page.get("NextToken")
+            if not token:
+                break
+        info.append(f"CloudTrail write events read: {len(ev)}" + (" (more exist, not read)" if token else ""))
+        failed = {}
         for e in ev:
-            detail = json.loads(e.get("CloudTrailEvent") or "{}")
-            if not a.include_reads and detail.get("readOnly"):
-                continue
-            rows.append(_j({"time": _iso(e["EventTime"]), "event": e["EventName"], "user": e.get("Username"),
-                            "source_ip": detail.get("sourceIPAddress"), "error": detail.get("errorCode"),
-                            "resources": [r.get("ResourceName") for r in e.get("Resources", [])][:5]}))
-        return "\n".join(rows)
+            d = json.loads(e.get("CloudTrailEvent") or "{}")
+            code = d.get("errorCode")
+            if code and not str(code).endswith("DryRunOperation"):
+                key = f"{e['EventName']} -> {code}"
+                failed[key] = failed.get(key, 0) + 1
+        for k, n in failed.items():
+            problems.append(f"CloudTrail: {k} ({n}x in the last {a.trail_hours} h)")
+        out = ["PROBLEMS (" + str(len(problems)) + "):"] + [f"- {p}" for p in problems] + ["INFO:"] + [f"- {x}" for x in info]
+        return "\n".join(out)
     return _run(go)
 
 

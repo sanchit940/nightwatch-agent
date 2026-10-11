@@ -137,6 +137,14 @@ REPORT_TOOL = {
                 "items": {"type": "object", "additionalProperties": False, "required": ["cause", "effect", "evidence"], "properties": {
                     "cause": {"type": "string"}, "effect": {"type": "string"},
                     "evidence": {"type": "string", "description": "Exact text copied from one tool result line"}}}},
+            "other_findings": {"type": "array", "maxItems": 10, "description": (
+                "For a review of a whole account, cluster or service: every OTHER independent problem that a tool result "
+                "proves, ranked by user impact. Each needs an exact evidence quote. Unproven items go to known_unknowns."),
+                "items": {"type": "object", "additionalProperties": False, "required": ["problem", "resource", "evidence"], "properties": {
+                    "problem": {"type": "string", "description": "One sentence, max 18 words"},
+                    "resource": {"type": "string"},
+                    "impact": {"type": "string", "enum": ["outage", "degraded", "risk", "cost"]},
+                    "evidence": {"type": "string", "description": "Exact text copied from one tool result line"}}}},
             "known_unknowns": {"type": "array", "items": {"type": "string"}},
             "recommendations": {"type": "array", "items": {"type": "object", "additionalProperties": False, "properties": {
                 "description": {"type": "string"}, "approval_id": {"type": "string"},
@@ -233,7 +241,17 @@ class Agent:
         self.client = neatlogs.wrap(client, agent="nightwatch", prompt_version=settings.prompt_version) if neatlogs and settings.neatlogs_api_key else client
         self.system = system_prompt(settings.prompt_version)
         from .connectors import enabled_tools
-        self.tools = [t.schema() for t in sorted(enabled_tools().values(), key=lambda t: t.name)] + [HYPOTHESES_TOOL, PROPOSE_TOOL, REPORT_TOOL]
+        self._enabled = enabled_tools()
+        self.scope: set[str] | None = None     # connectors allowed for the current incident (environment binding)
+        self.tools = self._tool_list()
+
+    def _tool_list(self) -> list[dict]:
+        tools = [t for t in sorted(self._enabled.values(), key=lambda t: t.name) if self.scope is None or t.connector in self.scope]
+        return [t.schema() for t in tools] + [HYPOTHESES_TOOL, PROPOSE_TOOL, REPORT_TOOL]
+
+    def set_scope(self, connectors: set[str] | None) -> None:
+        self.scope = connectors
+        self.tools = self._tool_list()
 
     # ----- one tool call through the policy gate -----
     def _dispatch(self, iid: str, block: Any, budget: Budget, stats: RunStats, proposals: list[str]) -> dict:
@@ -285,6 +303,11 @@ class Agent:
             stats.policy_denials += 1
             return {"type": "tool_result", "tool_use_id": block.id, "is_error": True, "content": f"POLICY {dec.code}: {dec.reason}"}
 
+        if self.scope is not None and name in TOOLS and TOOLS[name].connector not in self.scope:
+            stats.policy_denials += 1
+            self.audit.log("tool_denied", {"tool": name, "args": args, "code": "OUT_OF_ENVIRONMENT"}, iid)
+            return {"type": "tool_result", "tool_use_id": block.id, "is_error": True,
+                    "content": f"POLICY OUT_OF_ENVIRONMENT: {name} does not belong to this incident's environment."}
         with _trace("policy.check_tool", "GUARDRAIL", tool_name=name):
             dec = self.policy.check_tool(name, args, budget)
         if not dec.allowed:
@@ -406,6 +429,16 @@ class Agent:
                         results[i] = {"type": "tool_result", "tool_use_id": uses[i].id, "is_error": True,
                                       "content": "INVALID_REPORT: " + "; ".join(errs) + ". Send the COMPLETE report again with all required fields as structured JSON."}
                         continue
+                    if candidate.get("other_findings"):
+                        from .causality import _find
+                        outs = [f"@@ {e['payload'].get('tool')} {json.dumps(e['payload'].get('args'), sort_keys=True)}\n{e['payload'].get('output', '')}"
+                                for e in self.audit.events(iid) if e["kind"] == "tool_call"]
+                        proven = [f for f in candidate["other_findings"] if _find(f.get("evidence", ""), outs) or _find(f.get("problem", ""), outs)]
+                        unproven = [f for f in candidate["other_findings"] if f not in proven]
+                        candidate["other_findings"] = proven
+                        if unproven:
+                            candidate["known_unknowns"] = list(candidate.get("known_unknowns") or []) + [f"Not proven: {f.get('problem')}" for f in unproven]
+                            self.audit.log("findings_unproven", {"items": unproven}, iid)
                     report = candidate
                     self.audit.log("report", report, iid)
                     self.on_event("report", report)

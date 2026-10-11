@@ -5,6 +5,7 @@ Used by the CLI, the watch loop and the evaluation harness.
 
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Callable, Literal
@@ -192,14 +193,36 @@ class IncidentRunner:
         elif status == "rejected" and not from_slack:
             self.notifier.close_buttons(iid, rec["id"], f"❌ Rejected by {self._who(rec.get('approver'))}. No change made.")
 
+    # ----- environment binding -----
+    ENV_CONNECTORS = {
+        "aws": {"aws", "network", "knowledge"},
+        "lab": {"docker", "kubernetes", "linux", "network", "monitoring", "grafana", "loki", "knowledge"},
+        "ai-agent": {"neatlogs", "network", "knowledge"},
+    }
+
+    @staticmethod
+    def infer_environment(symptom: str) -> str:
+        """Deterministic: which environment an incident belongs to. Lab incidents never see the company AWS tools."""
+        low = symptom.lower()
+        if re.search(r"\b(aws|amazon|ec2|eks|alb|nlb|elb|cloudwatch|cloudtrail|rds|s3)\b|\b[a-z]{2}-(south|north|east|west|central|southeast|northeast)-\d\b", low) \
+                and not re.search(r"localhost|\bnw-|\blab\b(?! account)|kind-nightwatch", low.replace("not the local lab", "")):
+            return "aws"
+        if re.search(r"\b(ai agent|llm|trace|neatlogs)\b", low):
+            return "ai-agent"
+        return "lab"
+
     # ----- lifecycle -----
     def handle(self, symptom: str, source: str = "human", dedup_key: str | None = None, max_rounds: int = 3,
-               incident_id: str | None = None) -> IncidentOutcome:
+               incident_id: str | None = None, environment: str | None = None) -> IncidentOutcome:
         from .notify.slack import describe_action, execution_message
         iid = incident_id or self.audit.open_incident(symptom, source, dedup_key)
         self.on_event("incident", {"id": iid, "symptom": symptom})
         now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-        res: InvestigationResult = self.agent.run(iid, f"Incident {iid}. Current time {now}. Source: {source}.\nReported symptom: {symptom}")
+        env = environment or self.infer_environment(symptom)
+        self.audit.set_meta(iid, "environment", env)
+        self.audit.log("environment", {"environment": env, "connectors": sorted(self.ENV_CONNECTORS.get(env, []))}, iid)
+        self.agent.set_scope(self.ENV_CONNECTORS.get(env))
+        res: InvestigationResult = self.agent.run(iid, f"Incident {iid}. Current time {now}. Source: {source}. Environment: {env}.\nReported symptom: {symptom}")
         out = IncidentOutcome(iid, res.report, stats=res.stats, rounds=1)
         self._last_report = out.report
         self._notify_round(iid, out.report, res.proposals)

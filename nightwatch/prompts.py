@@ -85,6 +85,19 @@ V4_RULES = """
 """
 
 
+V6_RULES = """
+# Lessons from real-account runs (v6)
+- For any AWS question, call aws_health_summary FIRST. It lists the problems first, grouped by cause.
+- Do not guess CloudTrail event names one call at a time. Use one call, with up to 10 event_names, or no filter.
+- Output that says "output cut", "showing N of M" or "more exist" is incomplete: absent there does not mean healthy.
+- For a review of a whole account or service: give the problem with the largest user impact as root_cause, and list
+  every other PROVEN problem in other_findings, ranked by impact. Do not join independent problems into one story.
+- Prefer a proven problem with a visible cause (for example "instance X is stopped: user initiated shutdown") over a
+  mechanism you cannot see (for example "a controller is stuck"). If the cause is not visible, say unknown.
+- Use only the tools of the incident's environment. Never test internet endpoints of a company account from the agent host.
+"""
+
+
 def _severity_text() -> str:
     import yaml
     sev = (yaml.safe_load((ROOT / "policy.yaml").read_text()) or {}).get("severity") or {}
@@ -96,7 +109,7 @@ def system_prompt(version: str) -> str:
     if version == "v1":
         return V1 + "\n\n# Inventory\n" + inventory
     method = (ROOT / "knowledge" / "methodology.md").read_text()
-    core = V2_CORE + {"v3": V3_RULES, "v4": V4_RULES, "v5": V4_RULES}.get(version, "")
+    core = V2_CORE + {"v3": V3_RULES, "v4": V4_RULES, "v5": V4_RULES, "v6": V4_RULES + V6_RULES}.get(version, "")
     core += "\n# Severity (set one level per incident; it routes the approval)\n" + _severity_text() + "\n"
     return (core + "\n# Inventory (trusted)\n```yaml\n" + inventory + "```\n\n"
             "# Method reference (from Gregg, Systems Performance 2e; other runbooks: get_runbook topic=index)\n" + method)

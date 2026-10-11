@@ -264,6 +264,9 @@ def details_message(report: dict, audit: Audit, iid: str) -> dict:
     lines = ["*Details*", f"*Chain:* {chain_txt}." if chain_txt else "", f"*Checked:* {checked}"] + ([_bullets(unique_failed[:3])] if failed else [])
     if found:
         lines += ["*Found:*", _bullets(found)]
+    others = [f"{ste(o.get('problem'), 1, 15)} ({o.get('impact', '-')})" for o in (report.get("other_findings") or [])[:5]]
+    if others:
+        lines += ["*Other problems:*", _bullets(others)]
     if symptoms:
         lines += ["*Symptoms, not causes:*", _bullets(symptoms)]
     if unknown:

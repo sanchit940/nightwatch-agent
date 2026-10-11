@@ -134,3 +134,25 @@ def test_model_call_has_a_total_deadline(tmp_path):
     assert agent._call_model([{"role": "user", "content": "x"}], "inc-1", deadline_s=0.2, attempts=2) is None
     assert time.monotonic() - t < 2
     assert sum(1 for e in audit.events() if e["kind"] == "llm_call_failed") == 2
+
+
+def test_environment_binding(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from nightwatch.agent import Agent, RunStats
+    from nightwatch.incident import IncidentRunner as R
+    monkeypatch.setenv("NIGHTWATCH_AWS_PROFILE", "test")
+    assert R.infer_environment("Users get 503 errors on http://localhost:8080.") == "lab"
+    assert R.infer_environment("Staging services on AWS (ap-south-1) do not respond. Not the local lab.") == "aws"
+    s = Settings()
+    s.neatlogs_api_key, s.llm_api_key = "", "test"
+    audit = Audit(tmp_path / "a.db")
+    agent = Agent(s, Policy(ROOT / "policy.yaml", audit, "x"), audit)
+    agent.set_scope(R.ENV_CONNECTORS["lab"])
+    names = {t["name"] for t in agent.tools}
+    assert not any(n.startswith("aws_") for n in names) and "docker_inspect" in names   # lab never sees company AWS
+    block = SimpleNamespace(id="t1", name="aws_health_summary", input={})
+    res = agent._dispatch("inc-1", block, agent.policy.new_budget(), RunStats(), [])
+    assert res.get("is_error") and "OUT_OF_ENVIRONMENT" in res["content"]
+    agent.set_scope(R.ENV_CONNECTORS["aws"])
+    names = {t["name"] for t in agent.tools}
+    assert "aws_health_summary" in names and "docker_inspect" not in names
