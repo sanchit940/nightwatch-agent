@@ -144,10 +144,11 @@ def check_aws_targets(region: str | None, ignore: list[str]) -> list[Finding]:
 
 def _every(seconds: float, fn: Callable[[], list[Finding]]) -> Callable[[], list[Finding]]:
     """Run an expensive check at most once per interval; between runs, repeat its last result."""
-    state = {"t": 0.0, "last": []}
+    state: dict = {"t": None, "last": []}
 
     def wrapped() -> list[Finding]:
-        if time.monotonic() - state["t"] >= seconds:
+        # The first call always runs (the monotonic clock can be smaller than the interval on a new machine).
+        if state["t"] is None or time.monotonic() - state["t"] >= seconds:
             state["last"] = fn()
             state["t"] = time.monotonic()
         return state["last"]

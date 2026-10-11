@@ -143,10 +143,11 @@ def test_cloud_watch_checks_find_alarms_and_bad_targets(monkeypatch):
     assert "1 of 2" in tg["aws-targets:eu-west-1:web"] and "Target.InvalidState" in tg["aws-targets:eu-west-1:stopped"]
 
 
-def test_expensive_checks_run_once_per_interval():
+def test_expensive_checks_run_once_per_interval(monkeypatch):
+    monkeypatch.setattr(watch.time, "monotonic", lambda: 5.0)     # a machine that started 5 s ago
     calls = []
     c = watch._every(3600, lambda: calls.append(1) or [watch.Finding("k", "s")])
-    assert c() == c() and len(calls) == 1
+    assert c() == c() == [watch.Finding("k", "s")] and len(calls) == 1
 
 
 def _runner(policy_file, tmp_path):
