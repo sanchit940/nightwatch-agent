@@ -68,7 +68,7 @@ class TracesArgs(Args):
     minutes: int = Field(60, ge=1, le=10080, description="Look-back window")
     status: str | None = Field(None, pattern=r"^[a-z_]{2,20}$", description="Filter by trace status, for example error")
     workflow: str | None = Field(None, max_length=100, description="Filter by workflow name")
-    limit: int = Field(20, ge=1, le=100)
+    limit: int = Field(20, ge=1, le=50)
 
 
 @tool("neatlogs_traces", "List recent AI-agent traces from neatlogs with status, duration, LLM/tool call counts, tokens and cost. Use it for incidents in AI agents (errors, slowness, cost spikes).",

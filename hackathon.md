@@ -232,3 +232,14 @@
 **Outstanding (builder):** AWS read-only user and profile; neatlogs read token and project ID.
 - Live eval with the new connectors (prompt v5, `claude-haiku`, diagnosis mode): `redis-down`, `vm-service-crash`, `vm-disk-full` → root cause, resource and fix decision correct in 3/3. On the VM faults the agent used SSH checks, `linux_service_status`, Loki and Grafana by itself. Cost $0.36 in total.
 - Failure found: `vm-service-crash` needed 30 tool calls (187 s, $0.22). The decisive journal error line was in the middle of 50 lines of `linux_service_status`, and one LogQL query used an invalid `| tail 20`. Fix: `linux_service_status` now shows recent error and warning lines first; the `loki_query` description says that LogQL has no tail/head. Not re-measured yet.
+
+### 2026-10-11 — AWS (masked) and neatlogs read, live
+
+**Builder decisions:** AWS on for the agent, **with masking**. The builder added a read-only IAM user (default profile) and a neatlogs service-account token.
+
+**Completed**
+- AWS identity check (local, no LLM): user `NightWatch-agent`, account matches `.env`. IAM simulation: terminate, stop, security-group ingress, create access key, delete object → `implicitDeny`. Note: `s3:GetObject` is allowed (broad `ReadOnlyAccess` policy); NightWatch does not call S3; the least-privilege policy is recommended.
+- Live AWS connector (counts only): 32 EC2 instances (25 running, 0 impaired), 12 load balancers, 0 alarms in ALARM, CloudTrail events OK.
+- Masking (`nightwatch/masking.py`): account IDs (also in ARNs), public IPs/CIDRs, IAM user names, role session names and e-mails become stable placeholders; placeholders in tool inputs are restored before the AWS call. Verified on live output: no account ID, public IP or e-mail. Tests: 33 passed.
+- neatlogs read: `400 VALIDATION_ERROR` until `NEATLOGS_PROJECT_ID` was the project **UUID** (found with `GET /projects`); page size max 50. NightWatch now reads its own 98 traces. Evidence page with trace IDs for the key runs: `docs/neatlogs-evidence.md`.
+- Finding: neatlogs records 0 tokens and $0 for traces sent through the LiteLLM proxy. Measured costs come from the proxy.
