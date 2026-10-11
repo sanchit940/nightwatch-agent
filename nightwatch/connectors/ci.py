@@ -33,7 +33,8 @@ from .base import ActionResult, Args, RiskLevel, ToolOutput, action, tool
 PROVIDER = Literal["github", "gitlab", "jenkins"]
 PROJECT = Annotated[str, Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.\-/]{0,200}$",
                                description="github: owner/repo · gitlab: group/project · jenkins: job path, folders with '/' (for example team/app/main)")]
-ERROR_RE = re.compile(r"(?i)\b(error|failed|failure|fatal|exception|traceback|assert|denied|not found|cannot|timeout|timed out|exit code [1-9]|panic)\b")
+ERROR_RE = re.compile(r"(?i)(\berror|\bfailed\b|\bfailure\b|\bfatal\b|exception\b|\btraceback\b|\bassert\w*|\bdenied\b|\bnot found\b|"
+                      r"\bcannot\b|\btimed? ?out\b|\bexit code [1-9]|\bpanic\b|\bno matching distribution\b|\bnot set\b)")
 
 
 class CIError(Exception):
@@ -78,6 +79,8 @@ def _http(method: str, url: str, headers: dict | None = None, body: dict | None 
 def _tail_errors_first(log: str, max_errors: int = 40, tail: int = 40) -> str:
     """Errors first (a lesson from the lab: the decisive line hides in long logs), then the last lines."""
     lines = [re.sub(r"\x1b\[[0-9;]*m", "", l) for l in log.splitlines()]
+    lines = [l for l in lines if not l.startswith("+ echo ")]          # shell trace duplicates every echo line
+    lines = [re.sub(r"^\d{4}-\d\d-\d\dT[\d:.]+Z ", "", l) for l in lines]   # GitHub prefixes a timestamp
     errs = [l for l in lines if ERROR_RE.search(l)]
     # Keep the last error lines: the first errors are often warnings, the last ones explain the exit.
     out = ["== error lines (last %d of %d)" % (min(len(errs), max_errors), len(errs))] + errs[-max_errors:]
@@ -142,7 +145,8 @@ class GitHub:
                 log = _http("GET", f"{self.api}/repos/{project}/actions/jobs/{j['id']}/logs", self._h(), text=True, follow_without_auth=True)
                 excerpt = _tail_errors_first(log)
             except CIError as e:
-                excerpt = f"(log not available: {e}. A token is needed for logs of private repositories.)"
+                hint = " Set NIGHTWATCH_GITHUB_TOKEN (actions:read) to read job logs." if e.code in ("HTTP_401", "HTTP_403", "HTTP_404") else ""
+                excerpt = f"(log not available: {e.code}.{hint})"
             out.append({"job": j.get("name"), "failed_steps": steps, "log": excerpt})
         return out
 
@@ -187,7 +191,8 @@ class GitLab:
             try:
                 excerpt = _tail_errors_first(_http("GET", f"{self._base(project)}/jobs/{j['id']}/trace", self._h(), text=True))
             except CIError as e:
-                excerpt = f"(log not available: {e})"
+                hint = " Set GITLAB_TOKEN (read_api) to read job logs." if e.code in ("HTTP_401", "HTTP_403") else ""
+                excerpt = f"(log not available: {e.code}.{hint})"
             out.append({"job": f"{j.get('stage')}/{j.get('name')}", "failed_steps": [j.get("failure_reason") or "script_failure"],
                         "allow_failure": j.get("allow_failure"), "log": excerpt})
         return out
@@ -359,8 +364,9 @@ def ci_runs(a: RunsArgs) -> ToolOutput:
                 streak += 1
             good = next((r for r in done if r["status"] == "success"), None)
             first_bad = done[streak - 1]
-            head.append(f"FAILING: last {streak} finished run(s) failed. First failure: {first_bad['id']} (commit {first_bad['commit']}). "
-                        + (f"Last good: {good['id']} (commit {good['commit']}). Compare them with ci_compare_runs." if good else "No good run in this window."))
+            c = lambda r: f" (commit {r['commit']})" if r.get("commit") else ""
+            head.append(f"FAILING: last {streak} finished run(s) failed. First failure: {first_bad['id']}{c(first_bad)}. "
+                        + (f"Last good: {good['id']}{c(good)}. Compare them with ci_compare_runs." if good else "No good run in this window."))
         elif done:
             head.append(f"OK: the last finished run succeeded ({done[0]['id']}).")
         return "\n".join(head + [json.dumps({k: v for k, v in r.items() if v not in (None, "", [])}) for r in runs])

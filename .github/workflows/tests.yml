@@ -5,11 +5,11 @@ on:
     branches: [main]
   workflow_dispatch:
     inputs:
-      inject_failure:
-        description: "Lab only: make this run fail on purpose (for NightWatch CI tests)"
+      profile:
+        description: "Test profile"
         type: choice
-        options: [none, failing-test, bad-dependency]
-        default: none
+        options: [standard, tax-v2, extra-deps]
+        default: standard
 
 permissions:
   contents: read
@@ -26,11 +26,11 @@ jobs:
       - name: Install
         run: |
           python -m pip install --upgrade pip
-          if [ "${{ inputs.inject_failure }}" = "bad-dependency" ]; then
+          if [ "${{ inputs.profile }}" = "extra-deps" ]; then
             pip install "redis-py-cluster-client==9.9.9"
           fi
           pip install -e ".[dev]"
       - name: Test
         env:
-          NIGHTWATCH_CI_FAULT: ${{ inputs.inject_failure }}
+          SHOP_PROFILE: ${{ inputs.profile }}
         run: pytest -q tests
