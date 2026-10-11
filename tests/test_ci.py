@@ -85,3 +85,56 @@ def test_rerun_policy(tmp_path, monkeypatch):
     assert d.allowed                                                   # a flaky failure may be re-run (after approval)
     d = policy.propose("i", "ci_rerun_failed", {**params, "project": "someone/else"}, {"root_cause_category": "flaky_failure"})
     assert not d.allowed and d.code == "OUT_OF_SCOPE"
+
+
+def _server(handler_fn):
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    class H(BaseHTTPRequestHandler):
+        def do_GET(self):
+            handler_fn(self)
+
+        def log_message(self, *a):
+            pass
+    srv = HTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv
+
+
+def test_http_never_sends_token_to_sso_host_and_says_why():
+    seen = []
+
+    def h(req):
+        seen.append((req.headers.get("Host"), req.path, req.headers.get("Authorization")))
+        if req.path == "/api/json":                      # same host: follow with the token
+            req.send_response(302); req.send_header("Location", "/api/json/"); req.end_headers()
+        elif req.path == "/api/json/":                   # login proxy: other host (localhost vs 127.0.0.1)
+            req.send_response(302); req.send_header("Location", f"http://localhost:{req.server.server_port}/okta/login"); req.end_headers()
+        else:
+            req.send_response(200); req.send_header("Content-Type", "text/html"); req.end_headers(); req.wfile.write(b"<html>login</html>")
+    srv = _server(h)
+    try:
+        base = f"http://127.0.0.1:{srv.server_port}"
+        try:
+            ci._http("GET", base + "/api/json", {"Authorization": "Basic c2VjcmV0"})
+            raise AssertionError("expected SSO_REDIRECT")
+        except ci.CIError as e:
+            assert e.code == "SSO_REDIRECT" and "not sent" in str(e)
+        assert [s[1] for s in seen] == ["/api/json", "/api/json/"] and all(s[2] for s in seen)   # okta host never called
+        try:
+            ci._http("GET", f"http://localhost:{srv.server_port}/okta/login")
+            raise AssertionError("expected SSO_LOGIN_PAGE")
+        except ci.CIError as e:
+            assert e.code == "SSO_LOGIN_PAGE"
+    finally:
+        srv.shutdown()
+
+
+def test_jenkins_token_without_user_is_a_clear_error(monkeypatch):
+    monkeypatch.setenv("JENKINS_URL", "http://jenkins.invalid")
+    monkeypatch.delenv("JENKINS_USER", raising=False)
+    monkeypatch.delenv("JENKINS_TOKEN", raising=False)
+    monkeypatch.setenv("JENKINS_API_TOKEN", "x")
+    out = call("ci_runs", provider="jenkins", project="app/main")
+    assert not out.ok and "JENKINS_USER" in out.text

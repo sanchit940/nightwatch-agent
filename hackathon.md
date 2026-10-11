@@ -297,3 +297,9 @@
 - **Agent runs** (v6, `claude-haiku`, environment `ci`, changes denied): first runs found the cause, but the lab names gave it away (`FAULT`, `inject_failure`, `test_ci_lab_fault.py`, "lab fault" in the inventory). Renamed to neutral names and ran again: Jenkins → "registry credential REGISTRY_TOKEN not set for the publish-only profile" (correct); GitHub → the exact line `tax_rate * 0` and its fix (correct). 3 tool calls, 5–7 model calls, 35–52 s, $0.03–0.05 each. No re-run proposed (correct).
 - **Fix from the GitHub run:** the agent called the test "non-deterministic" because the same commit passed on push. `ci_compare_runs` now says when the trigger differs (manual runs can use other inputs).
 - Lab note: the stopped Jenkins container was renamed to `jenkins-lab`, so watch mode (prefix `nw-`) does not report it.
+
+### 2026-10-11 (late night) — Company Jenkins with Okta login
+
+- **Builder update:** added a Jenkins API token for the company Jenkins (people log in through Okta). Not yet set: `JENKINS_URL`, `JENKINS_USER`. No call to the company Jenkins yet.
+- **Found during review:** the HTTP helper followed redirects with the token. A login proxy that redirects to Okta would receive the token. Fixed: redirects keep the token only on the same host; to another host the request stops with `SSO_REDIRECT` (or `SSO_LOGIN_PAGE` for an HTML login page). Log downloads still follow without the token.
+- `JENKINS_API_TOKEN` is accepted as an alias of `JENKINS_TOKEN`; a token without `JENKINS_USER` gives a clear error. Tests: 50 passed, 1 skipped.

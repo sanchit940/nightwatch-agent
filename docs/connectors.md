@@ -63,3 +63,9 @@ One interface for three providers. The agent passes `provider` (`jenkins`, `gith
 Tokens (read): GitHub fine-grained token with `actions:read` (and `actions:write` for re-runs); GitLab `read_api` (`api` for retries);
 Jenkins API token of a user with Job/Read (Job/Build for re-runs). Incidents about CI get only the CI tools (environment `ci`).
 Local Jenkins lab: `bash lab/jenkins/up.sh`.
+
+Jenkins with Okta (or another single sign-on): people log in through Okta in the browser, but a Jenkins API token
+still works for the REST API with basic auth (`JENKINS_USER` = the Jenkins user ID, `JENKINS_TOKEN` = the token).
+The connector follows redirects with the token only on the same host. If a login proxy in front of Jenkins sends the
+request to the Okta host, the token is not sent there and the tool returns `SSO_REDIRECT` (or `SSO_LOGIN_PAGE` for
+an HTML login page). Then use an internal API address that is not behind the proxy, or ask the admin to allow API tokens.

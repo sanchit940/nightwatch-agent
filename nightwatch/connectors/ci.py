@@ -9,7 +9,8 @@ The model selects a provider and a project; the same tools work for all three:
 Configuration (environment):
   GitHub: NIGHTWATCH_GITHUB_TOKEN (optional for public repositories; required for logs of private ones and for re-runs)
   GitLab: GITLAB_URL (default https://gitlab.com), GITLAB_TOKEN (optional for public projects)
-  Jenkins: JENKINS_URL, JENKINS_USER, JENKINS_TOKEN (API token)
+  Jenkins: JENKINS_URL, JENKINS_USER, JENKINS_TOKEN (API token; JENKINS_API_TOKEN also works). With Okta (SAML/OIDC)
+           login, a Jenkins API token still works for the REST API, unless a login proxy sits in front of Jenkins.
 Projects that NightWatch may touch: `ci_projects` in inventory.yaml (scope: ci:<provider>/<project>).
 """
 
@@ -52,27 +53,48 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 
 def _http(method: str, url: str, headers: dict | None = None, body: dict | None = None, timeout: float = 20,
           text: bool = False, follow_without_auth: bool = False):
+    """Redirects are followed by hand: with the token only to the same host, otherwise without it (log downloads)
+    or not at all (a single sign-on page, for example Okta in front of Jenkins). The token never leaves its host."""
     data = json.dumps(body).encode() if body is not None else None
     h = {"User-Agent": "nightwatch/0.1", **(headers or {})}
     if data is not None:
         h.setdefault("Content-Type", "application/json")
-    req = urllib.request.Request(url, data=data, headers=h, method=method)
-    opener = urllib.request.build_opener(_NoRedirect) if follow_without_auth else urllib.request.build_opener()
-    try:
-        with opener.open(req, timeout=timeout) as r:
-            raw = r.read()
-    except urllib.error.HTTPError as e:
-        if follow_without_auth and e.code in (301, 302, 303, 307, 308) and e.headers.get("Location"):
-            # Log downloads redirect to a signed URL; never send the token to that other host.
-            with urllib.request.urlopen(urllib.request.Request(e.headers["Location"], headers={"User-Agent": "nightwatch/0.1"}), timeout=timeout) as r2:
-                raw = r2.read()
-        else:
-            detail = e.read()[:300].decode(errors="replace")
-            raise CIError(f"HTTP_{e.code}", f"HTTP {e.code}: {detail}") from None
-    except (urllib.error.URLError, TimeoutError, OSError) as e:
-        raise CIError("UNAVAILABLE", str(e)) from None
+    opener = urllib.request.build_opener(_NoRedirect)
+    host = urllib.parse.urlsplit(url).netloc
+    for _ in range(4):
+        req = urllib.request.Request(url, data=data, headers=h, method=method)
+        try:
+            with opener.open(req, timeout=timeout) as r:
+                raw, ctype = r.read(), r.headers.get("Content-Type", "")
+            break
+        except urllib.error.HTTPError as e:
+            loc = e.headers.get("Location") if e.code in (301, 302, 303, 307, 308) else None
+            if not loc:
+                detail = e.read()[:300].decode(errors="replace")
+                if "<html" in detail.lower() and e.code in (401, 403):
+                    detail = "the server sent an HTML page (login or access page), not an API answer"
+                raise CIError(f"HTTP_{e.code}", f"HTTP {e.code}: {detail}") from None
+            nxt = urllib.parse.urljoin(url, loc)
+            if urllib.parse.urlsplit(nxt).netloc == host:
+                url = nxt
+                continue
+            if follow_without_auth:
+                # Log downloads redirect to a signed URL; never send the token to that other host.
+                with urllib.request.urlopen(urllib.request.Request(nxt, headers={"User-Agent": "nightwatch/0.1"}), timeout=timeout) as r2:
+                    raw, ctype = r2.read(), r2.headers.get("Content-Type", "")
+                break
+            raise CIError("SSO_REDIRECT", f"{host} sent the request to {urllib.parse.urlsplit(nxt).netloc} (single sign-on). "
+                          "The API token was not sent there. A proxy in front of the server asks for a browser login. "
+                          "Use an API address that is not behind the login proxy, or ask the admin to allow API tokens.") from None
+        except (urllib.error.URLError, TimeoutError, OSError) as e:
+            raise CIError("UNAVAILABLE", str(e)) from None
+    else:
+        raise CIError("REDIRECT_LOOP", f"too many redirects from {host}")
     if text:
         return raw.decode(errors="replace")
+    if "html" in ctype.lower() or raw.lstrip()[:1] == b"<":
+        raise CIError("SSO_LOGIN_PAGE", f"{host} sent an HTML page, not JSON. Usually this is a single sign-on login page: "
+                      "the API token was not accepted at the proxy.")
     return json.loads(raw) if raw.strip() else {}
 
 
@@ -219,11 +241,15 @@ class Jenkins:
         base = os.environ.get("JENKINS_URL", "").rstrip("/")
         if not base:
             raise CIError("NOT_CONFIGURED", "set JENKINS_URL (and JENKINS_USER / JENKINS_TOKEN)")
+        if not os.environ.get("JENKINS_USER") and (os.environ.get("JENKINS_TOKEN") or os.environ.get("JENKINS_API_TOKEN")):
+            raise CIError("NOT_CONFIGURED", "the Jenkins token is set but JENKINS_USER is not: set the Jenkins user ID "
+                          "(Jenkins > your name, top right > the ID in the page address)")
         return base + "".join(f"/job/{urllib.parse.quote(part)}" for part in project.strip("/").split("/"))
 
     def _h(self) -> dict:
         if os.environ.get("JENKINS_USER"):
-            raw = f"{os.environ['JENKINS_USER']}:{os.environ.get('JENKINS_TOKEN', '')}".encode()
+            token = os.environ.get("JENKINS_TOKEN") or os.environ.get("JENKINS_API_TOKEN", "")
+            raw = f"{os.environ['JENKINS_USER']}:{token}".encode()
             return {"Authorization": "Basic " + base64.b64encode(raw).decode()}
         return {}
 
