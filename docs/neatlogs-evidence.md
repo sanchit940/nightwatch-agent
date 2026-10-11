@@ -9,8 +9,8 @@ Traces since 2026-10-10 by workflow: `nightwatch-eval-v1` 12, `nightwatch-eval-v
 
 | Run | Incident (session) | Trace IDs | Tags | What it shows |
 |---|---|---|---|---|
-| First live run (Opus 4.6) | `inc-20261010-163115-b70d` | `6169a87aae1f3001b3a0cb86bd99c96c`, `80c4bb46da27c97768865d57fa78e66c` | model:claude-opus-4.6,prompt:v2 | 124k input tokens, 0 cache reads → caching bug found |
-| After the caching fix (Opus 4.6) | `inc-20261010-163504-e688` | `ce77aab548090e1a7a10aa036cd3b0e3`, `58535eb04e9e0d83465cf25f8895bba4` | model:claude-opus-4.6,prompt:v2 | 121k tokens read from cache, cost −53% |
+| First live run (Opus 4.6) | `inc-20261010-163115-b70d` | `6169a87aae1f3001b3a0cb86bd99c96c`, `80c4bb46da27c97768865d57fa78e66c` | model:claude-opus-4.6,prompt:v2 | first live run (its token numbers come from NightWatch's run stats: 124k input, 0 cache reads) |
+| After the caching fix (Opus 4.6) | `inc-20261010-163504-e688` | `ce77aab548090e1a7a10aa036cd3b0e3`, `58535eb04e9e0d83465cf25f8895bba4` | model:claude-opus-4.6,prompt:v2 | after the caching fix (run stats: 121k tokens from cache, cost −53%) |
 | Before: v1, nginx-bad-upstream | `inc-20261010-165140-bb3b` | `fc57e282a704b4e87be0f3c675c818ef` | model:claude-haiku,prompt:v1 | v1 proposed a restart for a config fault |
 | After: v5, nginx-bad-upstream | `inc-20261010-181912-ce9e` | `641a7d2670bf309b303d5d4c31d51417` | model:claude-haiku,prompt:v5 | v5: restart blocked (INCOMPATIBLE_FIX), escalated to a human |
 | Before: v1, k8s-pending | `inc-20261010-171652-7b19` | `ab068bbe221d43f6d0e5869e52b3fdc0` | model:claude-haiku,prompt:v1 | v1 proposed scaling (cannot fix) |

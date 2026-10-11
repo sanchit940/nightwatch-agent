@@ -18,10 +18,10 @@ How do you let an agent touch prod at 3am? NightWatch:
 - stale, modified, replayed or forged approvals are rejected (41 tests in total)
 #neatHack
 
-## Post 3 — first live run, and a bug neatlogs showed
+## Post 3 — first live run, and a cost bug
 
 First live run: Redis down → root cause found, fix approved, verified (HTTP 200) in 101 s.
-The trace showed 124k input tokens and 0 cache reads: our proxy dropped the cache flag. Explicit cache breakpoints → $0.69 → $0.33 per incident (−53%). #neatHack
+Our run stats showed 124k input tokens and 0 cache reads: the proxy dropped the cache flag. Explicit cache breakpoints → $0.69 → $0.33 per incident (−53%). #neatHack
 
 ## Post 4 — before/after numbers
 

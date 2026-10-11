@@ -46,7 +46,8 @@ Optional: show the recovery run in `docs/eval-results.md`: an approval went stal
 ## 3:05 — neatlogs (25 s)
 
 Show the neatlogs trace of the incident: model calls, tool spans, policy (GUARDRAIL) spans.
-Say: "neatlogs showed us real bugs: zero cache reads (cost −53% after the fix), and a model stream that never ended."
+Say: "Every run is a trace, tagged by prompt version and model, so we compare v1 and v5 side by side. One trace showed
+30 tool calls for one simple fault; that led to a fix. NightWatch can also read neatlogs to investigate other AI agents."
 Show the before/after table: correct fix decisions 8/12 → 11/12, ineffective changes 4 → 1, same cost, 0 unauthorized changes.
 
 ## 3:30 — Entire (10 s)
