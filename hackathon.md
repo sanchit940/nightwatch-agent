@@ -211,4 +211,4 @@
 - Slack app installed (bot `nightwatch2`, Socket Mode). Channel and member IDs are in the git-ignored `policy.local.yaml`, not in the public repo.
 - Live run (`redis-down`, `claude-haiku`, prompt v5): plan posted to the channel at 11:36:47 (P0, @channel). The approver clicked **Approve** in Slack at 11:42:35. NightWatch executed `start_container nw-redis` at 11:42:36, verified 3/3 checks at 11:42:42, and reported `resolved`. Cost $0.11. Audit chain intact. Approver recorded as `slack:<member ID>`.
 - Known limit: the app uses rotating app-level tokens (`xoxe.xapp-…`). They expire. Before the demo, generate a fresh app-level token.
-- Note: an earlier commit (`7c0e9a1`-era policy edit, before `3fddca6`) contains the approver member ID in the public history.
+- Note: commit `797b569` contains the approver member ID in the public history. The current files do not.
