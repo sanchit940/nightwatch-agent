@@ -386,6 +386,7 @@ class Agent:
                         from .causality import check_chain, split_chain
                         outputs = [f"@@ {e['payload'].get('tool')} {json.dumps(e['payload'].get('args'), sort_keys=True)}\n{e['payload'].get('output', '')}"
                                    for e in self.audit.events(iid) if e["kind"] == "tool_call"]
+                        outputs.append("@@ reported_symptom\n" + ((self.audit.incident(iid) or {}).get("symptom") or ""))
                         errs = check_chain(candidate.get("causal_chain") or [], outputs)
                         if errs and stats.report_rejections >= 2:
                             # No retry storm: accept, but never present an unproven link as fact.

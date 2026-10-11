@@ -57,3 +57,15 @@ def test_paraphrase_with_real_values_passes_but_invented_values_fail():
     tagged = '@@ net_http_check {"source": "nw-toolbox", "url": "http://api:8000/healthz"}\n' + out
     assert check_chain(ok, [tagged]) == []
     assert check_chain(bad, [tagged])
+
+
+def test_combined_sources_and_ellipsis_pass_time_correlation_still_fails():
+    from nightwatch.causality import check_chain
+    logs = "@@ docker_logs {\"container\": \"nw-api\"}\n2026-10-11T12:57:13Z ERROR redis dns lookup failed host=redis port=6379 error=\"Error -2 connecting to redis:6379. Name or service not known.\""
+    events = "@@ docker_events {}\n2026-10-11T12:54:42Z\tcontainer\tkill\tnw-redis\n2026-10-11T12:54:42Z\tcontainer\trestart\tnw-vm"
+    ok = [{"cause": "nw-redis stopped", "effect": "nw-api cannot resolve redis",
+           "evidence": "docker_logs (nw-api): 'ERROR redis dns lookup failed host=redis port=6379... Name or service not known'; docker_inspect: ExitCode=0"}]
+    assert check_chain(ok, [logs, events]) == []
+    bad = [{"cause": "shop-worker restart on nw-vm", "effect": "nw-redis was stopped",
+            "evidence": "docker_events: 'kill nw-redis' at 12:54:42Z; 'restart nw-vm' at 12:54:42Z"}]
+    assert check_chain(bad, [logs, events])

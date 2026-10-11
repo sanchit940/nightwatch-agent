@@ -126,21 +126,30 @@ def _distinct(text: str) -> set[str]:
     return toks
 
 
+def _pieces(quote: str) -> list[str]:
+    """Models combine sources ("docker_events: ...; docker_inspect: ...") and shorten quotes with "...".
+    Split the evidence into pieces: the whole text, each part between ';', and each quoted text split at '...'."""
+    parts = [quote] + [p for p in re.split(r";\s*|\s+\|\s+", quote) if p.strip()]
+    for q in re.findall(r"'([^']{8,})'|\"([^\"]{8,})\"", quote):
+        parts += [x for x in re.split(r"\.\.\.|…", q[0] or q[1]) if len(x.strip()) >= 8]
+    return list(dict.fromkeys(p.strip() for p in parts))
+
+
 def _find(quote: str, outputs: list[str]) -> list[str]:
-    """Records (see _records) that support the quote: either the quote text itself (compared loosely), or ALL the
-    specific values of the quote (at least 3) inside ONE record. Values spread over two neighbouring event lines
-    never match: that is time correlation."""
-    q = _loose(quote)
-    if len(q) < 10:
-        return []
-    want = {_loose(t) for t in _distinct(quote)}
+    """Records (see _records) that support at least one piece of the evidence: the piece text itself (compared
+    loosely, min 12 characters), or ALL specific values of the piece (at least 3) inside ONE record. Values spread
+    over two neighbouring event lines never match one record: that is time correlation."""
+    recs = [_loose(r) for o in outputs for r in _records(o)]
     hits = []
-    for o in outputs:
-        for rec in _records(o):
-            lr = _loose(rec)
-            if q in lr or (len(want) >= 3 and all(w in lr for w in want)):
+    for piece in _pieces(quote):
+        q = _loose(piece)
+        if len(q) < 10:
+            continue
+        want = {_loose(t) for t in _distinct(piece)}
+        for lr in recs:
+            if (len(q) >= 12 and q in lr) or (len(want) >= 3 and all(w in lr for w in want)):
                 hits.append(lr)
-    return hits
+    return list(dict.fromkeys(hits))
 
 
 def check_chain(chain: list[dict], outputs: list[str]) -> list[str]:
@@ -156,7 +165,11 @@ def check_chain(chain: list[dict], outputs: list[str]) -> list[str]:
             errs.append(f"causal_chain[{i}] {cause} -> {effect}: the evidence quote is not in any tool result of this incident")
             continue
         a, b = nodes_in(cause), nodes_in(effect)
-        if a and b and any(connected(x, y) for x in a for y in b):
+        if not (a and b) or a & b:
+            # A false link between two different components is the risk. A link to a pure symptom ("all requests
+            # return 503") or inside one component only needs proven evidence.
+            continue
+        if any(connected(x, y) for x in a for y in b):
             continue
         ta, tb = {_loose(t) for t in _tokens(cause)}, {_loose(t) for t in _tokens(effect)}
         if any(any(t and t in h for t in ta) and any(t and t in h for t in tb) for h in hits):
