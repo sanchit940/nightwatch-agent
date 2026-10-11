@@ -12,12 +12,15 @@ from typing import Annotated
 
 from pydantic import Field
 
-from ..runner import run
+import os
+
+from ..runner import CmdResult, redact, run
 from .base import Args, RiskLevel, ToolOutput, tool
 
-TARGET = Annotated[str, Field(pattern=r"^(host:)?[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$",
+TARGET = Annotated[str, Field(pattern=r"^((host:)?[A-Za-z0-9][A-Za-z0-9_.-]{0,127}|ssm:i-[0-9a-f]{8,17})$",
                                description="Linux target: a container name (for example nw-api), a kind node container (nightwatch-control-plane), "
-                                           "or a server reached over SSH as host:<name> from the inventory (for example host:nw-vm)")]
+                                           "a server reached over SSH as host:<name> from the inventory (for example host:nw-vm), "
+                                           "or an EC2 instance reached through AWS Systems Manager as ssm:<instance-id> (see aws_ssm_instances)")]
 
 _HAVE = "have() { command -v \"$1\" >/dev/null 2>&1; }; "
 
@@ -101,10 +104,10 @@ class LinuxCheckArgs(Args):
 
 def _ssh_hosts() -> dict:
     import yaml
-    from ..config import ROOT
-    inv = yaml.safe_load((ROOT / "inventory.yaml").read_text()) or {}
+    from ..config import config_file
+    inv = yaml.safe_load(config_file("inventory.yaml").read_text()) or {}
     hosts = {h["name"]: h for h in inv.get("ssh_hosts", []) or []}
-    local = ROOT / "inventory.local.yaml"
+    local = config_file("inventory.local.yaml")
     if local.exists():
         hosts.update({h["name"]: h for h in (yaml.safe_load(local.read_text()) or {}).get("ssh_hosts", []) or []})
     return hosts
@@ -115,11 +118,12 @@ def _argv(target: str, script: str, *args: str) -> list[str] | str:
     if not target.startswith("host:"):
         return ["docker", "exec", target, "sh", "-c", script, "_", *args]
     import shlex
-    from ..config import ROOT
+    from ..config import config_dir
     h = _ssh_hosts().get(target[5:])
     if not h:
         return f"unknown host {target[5:]}: add it to ssh_hosts in inventory.yaml"
-    path = lambda p: str((ROOT / p).resolve()) if p and not str(p).startswith("/") else str(p)
+    # Relative key and known_hosts paths are relative to the config folder (the repository by default).
+    path = lambda p: str((config_dir() / p).resolve()) if p and not str(p).startswith("/") else str(p)
     remote = " ".join(shlex.quote(x) for x in ["sh", "-c", script, "_", *args])
     return ["ssh", "-i", path(h["key_file"]), "-p", str(h.get("port", 22)),
             "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes", "-o", f"UserKnownHostsFile={path(h['known_hosts'])}",
@@ -127,7 +131,65 @@ def _argv(target: str, script: str, *args: str) -> list[str] | str:
             f"{h['user']}@{h['address']}", remote]
 
 
+def _ssm_run(instance_id: str, script: str, args: tuple[str, ...], timeout: float) -> CmdResult | ToolOutput:
+    """The same constant script, sent with AWS-RunShellScript through SSM Run Command: no SSH key, no open port.
+    The AWS credentials and the account pin of the AWS connector apply."""
+    import shlex
+    import time
+
+    from .aws import AwsError, _client
+    cmd = " ".join(shlex.quote(x) for x in ["sh", "-c", script, "_", *args])
+    t0 = time.monotonic()
+    try:
+        ssm = _client("ssm", None)
+        r = ssm.send_command(InstanceIds=[instance_id], DocumentName="AWS-RunShellScript", TimeoutSeconds=30,
+                             Comment="NightWatch read-only check", Parameters={"commands": [cmd], "executionTimeout": [str(int(timeout))]})
+        cid = r["Command"]["CommandId"]
+        inv: dict = {}
+        while time.monotonic() - t0 < timeout + 15:
+            time.sleep(1.0)
+            try:
+                inv = ssm.get_command_invocation(CommandId=cid, InstanceId=instance_id)
+            except Exception as e:  # noqa: BLE001 - the invocation can appear a moment after send_command
+                if "InvocationDoesNotExist" in type(e).__name__ or "InvocationDoesNotExist" in str(e):
+                    continue
+                raise
+            if inv.get("Status") not in ("Pending", "InProgress", "Delayed"):
+                break
+        else:
+            return CmdResult([f"ssm:{instance_id}"], -1, "", "SSM command did not finish in time", int((time.monotonic() - t0) * 1000), error_code="TIMEOUT")
+    except AwsError as e:
+        return ToolOutput(False, str(e), e.code)
+    except Exception as e:  # noqa: BLE001 - botocore errors carry a code
+        code = (getattr(e, "response", None) or {}).get("Error", {}).get("Code") or "SSM_FAILED"
+        hint = {"InvalidInstanceId": " (the instance is not managed by SSM, is stopped, or its SSM agent is offline; see aws_ssm_instances)",
+                "AccessDeniedException": " (the role needs ssm:SendCommand for AWS-RunShellScript on this instance)"}.get(code, "")
+        return ToolOutput(False, f"{type(e).__name__}: {str(e)[:300]}{hint}", code)
+    status = inv.get("Status", "Unknown")
+    out = inv.get("StandardOutputContent", "")
+    err = inv.get("StandardErrorContent", "")
+    rc = inv.get("ResponseCode", -1)
+    if status not in ("Success", "Failed"):
+        err = f"SSM status {status}: {inv.get('StatusDetails', '')}\n{err}"
+    res = CmdResult([f"ssm:{instance_id}"], rc if isinstance(rc, int) else -1, redact(out)[:14000], redact(err)[:4000],
+                    int((time.monotonic() - t0) * 1000))
+    if os.environ.get("NIGHTWATCH_AWS_MASK", "1") != "0":
+        from ..masking import MASKER
+        res.stdout, res.stderr = MASKER.mask(res.stdout), MASKER.mask(res.stderr)
+    return res
+
+
 def _exec(target: str, script: str, timeout: float = 20, args: tuple[str, ...] = ()) -> ToolOutput:
+    if target.startswith("ssm:"):
+        res = _ssm_run(target[4:], script, args, timeout)
+        if isinstance(res, ToolOutput):
+            return res
+        if res.error_code == "TIMEOUT":
+            return ToolOutput(False, res.stderr, "TIMEOUT")
+        text = f"exit={res.exit_code} duration_ms={res.duration_ms} via=ssm\n{res.stdout}"
+        if res.stderr.strip():
+            text += f"\n[stderr]\n{res.stderr}"
+        return ToolOutput(True, text)
     argv = _argv(target, script, *args)
     if isinstance(argv, str):
         return ToolOutput(False, argv, "NOT_FOUND")
@@ -162,9 +224,16 @@ class SnapshotArgs(Args):
       "USE-method snapshot of a Linux target in one call: load, PSI pressure, memory, cgroup limits/throttling/OOM counters, disk capacity+inodes, top processes. Use it first for any host or container resource question.",
       SnapshotArgs, RiskLevel.READ, "linux", timeout_s=40, targets=lambda a: [f"linux:{a.target}"])
 def linux_use_snapshot(a: SnapshotArgs) -> ToolOutput:
+    names = ("load", "pressure", "memory", "cgroup", "disk", "processes")
+    if a.target.startswith("ssm:"):
+        # One SSM command for all six checks (each SSM round trip takes seconds).
+        script = "; ".join(f"echo '### {n}'; ( {CHECKS[n][1]} ) 2>&1" for n in names)
+        out = _exec(a.target, script, timeout=60)
+        out.text = out.text[:16000]
+        return out
     parts = []
     ok = True
-    for name in ("load", "pressure", "memory", "cgroup", "disk", "processes"):
+    for name in names:
         out = _exec(a.target, CHECKS[name][1], timeout=30)
         if out.error_code in ("NOT_FOUND", "TARGET_UNAVAILABLE"):
             return out

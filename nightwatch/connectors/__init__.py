@@ -7,7 +7,7 @@ from .base import ACTIONS, TOOLS, RiskLevel  # noqa: F401
 
 # A connector without configuration is hidden from the model: no wasted calls, smaller prompt.
 _REQUIRES = {
-    "aws": ("NIGHTWATCH_AWS_PROFILE",),
+    "aws": ("NIGHTWATCH_AWS_PROFILE", "NIGHTWATCH_AWS_CREDENTIALS"),
     "neatlogs": ("NEATLOGS_READ_TOKEN", "NEATLOGS_PUBLIC_API_KEY"),
     "grafana": ("GRAFANA_URL",),
     "loki": ("LOKI_URL", "GRAFANA_URL"),

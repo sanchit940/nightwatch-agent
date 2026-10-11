@@ -10,6 +10,7 @@ scope:
     - "linux:nw-*"
     - "linux:nightwatch-control-plane"
     - "linux:host:*"            # servers in inventory ssh_hosts (key-only SSH, known host keys only)
+    - "linux:ssm:*"             # EC2 instances through AWS Systems Manager (same fixed checks, AWS credentials)
     - "grafana"
     - "grafana:*"
     - "loki"

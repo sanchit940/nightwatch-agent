@@ -22,6 +22,10 @@ Our agent blamed the wrong service: two events in the same second. Now every cau
 
 NightWatch runs with your own Anthropic key. Clone it, start the Docker lab, break Redis, and watch it find the cause. It asks you before it changes anything. About 10 minutes to set up, about $0.07 per incident. https://github.com/sanchit940/nightwatch-agent #neatHack
 
+### Alternative to C — "run it in your own cloud"
+
+Run NightWatch in your own AWS with your own Anthropic key: one container, a read-only role, no inbound ports. It watches CloudWatch alarms and load balancers, checks servers through SSM, and asks in Slack before any change. https://github.com/sanchit940/nightwatch-agent #neatHack
+
 ## Long list (not used)
 
 ## Post 1 — start

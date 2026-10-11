@@ -9,6 +9,22 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 
+def config_dir() -> Path:
+    """Folder with policy.yaml, inventory.yaml and watch.yaml. Default: the repository. In the container: /config."""
+    d = os.environ.get("NIGHTWATCH_CONFIG_DIR")
+    return Path(d).expanduser().resolve() if d else ROOT
+
+
+def config_file(name: str) -> Path:
+    return config_dir() / name
+
+
+def data_dir() -> Path:
+    """Writable folder for the audit database and the Slack dry-run outbox."""
+    d = os.environ.get("NIGHTWATCH_DATA_DIR")
+    return Path(d).expanduser().resolve() if d else ROOT / "runs"
+
+
 def load_dotenv(path: Path = ROOT / ".env") -> None:
     """Load KEY=VALUE lines into os.environ. Existing variables win."""
     if not path.exists():
@@ -45,6 +61,8 @@ class Settings:
     def from_env(cls) -> "Settings":
         load_dotenv()
         s = cls()
+        s.policy_file = config_file("policy.yaml")
+        s.audit_db = data_dir() / "audit.db"
         s.model = os.environ.get("NIGHTWATCH_MODEL", s.model)
         s.effort = os.environ.get("NIGHTWATCH_EFFORT", s.effort)
         s.approval_secret = os.environ.get("NIGHTWATCH_APPROVAL_SECRET", "")
@@ -59,6 +77,7 @@ class Settings:
         if db := os.environ.get("NIGHTWATCH_AUDIT_DB"):
             s.audit_db = Path(db)
         s.audit_db.parent.mkdir(parents=True, exist_ok=True)
+        data_dir().mkdir(parents=True, exist_ok=True)
         return s
 
 

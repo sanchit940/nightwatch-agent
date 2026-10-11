@@ -215,6 +215,17 @@ class IncidentRunner:
             return "ai-agent"
         return "lab"
 
+    def environment_for(self, symptom: str, explicit: str | None = None) -> tuple[str, set[str]]:
+        """Environment and its connectors. policy.yaml can redefine environments (`environments`) and the
+        environment for symptoms that name no platform (`default_environment`, for example aws on a cloud install)."""
+        cfg = self.policy.cfg
+        envs = {**self.ENV_CONNECTORS, **{k: set(v or []) for k, v in (cfg.get("environments") or {}).items()}}
+        env = explicit or self.infer_environment(symptom)
+        if not explicit and env == "lab" and cfg.get("default_environment"):
+            env = cfg["default_environment"]
+        # An unknown environment gets only the knowledge tools: never every tool.
+        return env, envs.get(env, {"knowledge"})
+
     # ----- lifecycle -----
     def handle(self, symptom: str, source: str = "human", dedup_key: str | None = None, max_rounds: int = 3,
                incident_id: str | None = None, environment: str | None = None) -> IncidentOutcome:
@@ -222,10 +233,10 @@ class IncidentRunner:
         iid = incident_id or self.audit.open_incident(symptom, source, dedup_key)
         self.on_event("incident", {"id": iid, "symptom": symptom})
         now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-        env = environment or self.infer_environment(symptom)
+        env, connectors = self.environment_for(symptom, environment)
         self.audit.set_meta(iid, "environment", env)
-        self.audit.log("environment", {"environment": env, "connectors": sorted(self.ENV_CONNECTORS.get(env, []))}, iid)
-        self.agent.set_scope(self.ENV_CONNECTORS.get(env))
+        self.audit.log("environment", {"environment": env, "connectors": sorted(connectors)}, iid)
+        self.agent.set_scope(connectors)
         res: InvestigationResult = self.agent.run(iid, f"Incident {iid}. Current time {now}. Source: {source}. Environment: {env}.\nReported symptom: {symptom}")
         out = IncidentOutcome(iid, res.report, stats=res.stats, rounds=1)
         self._last_report = out.report

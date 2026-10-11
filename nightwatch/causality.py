@@ -13,7 +13,7 @@ from functools import lru_cache
 
 import yaml
 
-from .config import ROOT
+from .config import config_file
 
 STOP = {"the", "and", "for", "with", "from", "that", "this", "container", "service", "deployment", "pod", "pods", "host",
         "server", "was", "were", "not", "has", "have", "cannot", "into", "because", "after", "before", "down", "error"}
@@ -22,7 +22,7 @@ STOP = {"the", "and", "for", "with", "from", "that", "this", "container", "servi
 @lru_cache(maxsize=1)
 def graph() -> tuple[dict[str, str], dict[str, set[str]]]:
     """(alias -> node, node -> neighbours). Built only from the human-owned inventory."""
-    inv = yaml.safe_load((ROOT / "inventory.yaml").read_text()) or {}
+    inv = yaml.safe_load(config_file("inventory.yaml").read_text()) or {}
     alias: dict[str, str] = {}
     adj: dict[str, set[str]] = {}
 

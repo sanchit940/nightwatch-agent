@@ -1,0 +1,18 @@
+# NightWatch in your own cloud.  cd deploy && cp .env.example .env  (fill it in)  &&  docker compose up -d --build
+# Logs: docker compose logs -f. Commands: docker compose exec nightwatch nightwatch approvals
+services:
+  nightwatch:
+    build: ..
+    image: nightwatch-agent:local
+    env_file: .env
+    volumes:
+      - ./config:/config:ro              # your policy.yaml, inventory.yaml, watch.yaml (and ssh/ keys)
+      - nightwatch-data:/data            # audit database
+    restart: unless-stopped
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+
+volumes:
+  nightwatch-data: {}

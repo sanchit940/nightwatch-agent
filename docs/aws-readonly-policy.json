@@ -28,6 +28,7 @@
         "eks:DescribeNodegroup",
         "iam:SimulatePrincipalPolicy",
         "route53:ListResourceRecordSets",
+        "ssm:DescribeInstanceInformation",
         "sts:GetCallerIdentity"
       ],
       "Resource": "*"

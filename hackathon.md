@@ -310,3 +310,18 @@
 - NightWatch already reads the key from `.env`. Changes: README "Try it (bring your own key)"; default model `claude-sonnet-5-5` for a direct Anthropic key (the old default was a proxy name); a clear message when no key is set; if a model rejects adaptive thinking or effort, NightWatch continues without them (test added).
 - `.claude/settings.json` (local Entire hooks for the build sessions) removed from the repo; the local file stays, so Entire still records checkpoints.
 - **Fresh-clone test** of the public repo: install OK, 51 tests passed (1 skipped), clear no-key message. With only a key in the environment (neatHack proxy as the stand-in), redis-down: cause found (`nw-redis` stopped), fix proposed (`docker start nw-redis`), change denied as asked. 9 tool calls, 43.5 s, $0.07. Not tested: a direct Anthropic key (we have only the proxy key).
+
+### 2026-10-11 (late night) — Run it in your own cloud (self-hosted image, bring your own key)
+
+- **Builder request:** people connect NightWatch to their own AWS, their Linux servers on any cloud and their logs, with only their own key. Question: host it, or give an image?
+- **Decision (recommended to the builder):** self-hosted image in the user's own account. No hosting by us; keys, data and AWS access stay with the user. A hosted (SaaS) version stays a later, paid option.
+- **Built:**
+  - one config folder (`NIGHTWATCH_CONFIG_DIR`) and data folder (`NIGHTWATCH_DATA_DIR`);
+  - AWS role mode (`NIGHTWATCH_AWS_CREDENTIALS=role`: EC2, ECS or EKS role), with the account pin required;
+  - Linux checks through AWS Systems Manager (`ssm:<instance-id>`, same constant scripts, output masked), and the tool `aws_ssm_instances`;
+  - watch checks for CloudWatch alarms in ALARM and load balancer targets that do not serve traffic (`interval_s`, `ignore`);
+  - environments and default environment configurable in `policy.yaml` (a cloud install has no lab; unknown environment = knowledge tools only);
+  - starter config `deploy/config/` (read-only policy, empty inventory, cloud watch checks); `Dockerfile` (non-root, read-only file system); `deploy/docker-compose.yml`; CloudFormation `deploy/aws/nightwatch.yaml` (t4g.small, read-only role, no inbound rules, IMDSv2 hop limit 2, settings from one SSM SecureString, SSM checks off by default and limited to instances tagged `nightwatch=read`); guide `docs/self-host.md`.
+- **Tests:** 62 passed, 1 skipped (11 new). Container tests (read-only, all capabilities dropped): no-key message; AWS watch round on the real account found the known problems (stopped instances, failed health checks, wrong response codes, a timeout); role mode with the right pin works, without a pin or with a wrong pin is refused; `aws_ssm_instances` lists 23 managed instances; SSH from the container to the lab VM works; one full investigation in the container: 15 tool calls, 98 s, $0.07. The CloudFormation template passes `cfn-lint`; it is not deployed (our AWS user is read-only).
+- **Incident in the test:** with the starter policy, the agent tried the new SSM check on one company instance (2 calls). AWS refused both (`AccessDeniedException`): our user has no `ssm:SendCommand`. Nothing ran on the instance. The IAM control worked; the template keeps SSM checks off by default.
+- **Not done:** Azure and GCP API connectors (no account to test; SSH to their VMs works).

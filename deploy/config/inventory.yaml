@@ -1,0 +1,34 @@
+# Your infrastructure, as facts for the agent. Owned by humans. It is part of the agent's prompt, and the agent
+# trusts it: write only true facts. The causal-chain check uses depends_on to accept "A caused B" claims.
+# Empty is allowed: the agent then discovers the resources with its tools.
+environments: []
+#  - name: production
+#    platform: aws
+#    region: us-east-1
+#    services:
+#      - name: web
+#        role: public entry point (ALB, https://example.com)
+#        depends_on: [app]
+#      - name: app
+#        role: application servers (EC2 Auto Scaling group, port 8080, health check /healthz)
+#        depends_on: [db]
+#      - name: db
+#        role: RDS PostgreSQL
+#    request_path: "client -> ALB -> app (EC2, :8080) -> db (RDS, :5432)"
+
+# EC2 instances with the SSM agent need no entry: the agent finds them with aws_ssm_instances and checks them as
+# ssm:<instance-id>. Servers without SSM (other clouds, on-premises) are reached over SSH:
+ssh_hosts: []
+#  - name: app-1
+#    role: application server; runs app.service
+#    address: 10.0.1.15
+#    port: 22
+#    user: nightwatch                       # read access to the journal: group systemd-journal
+#    key_file: ssh/id_ed25519               # relative to this folder
+#    known_hosts: ssh/known_hosts           # ssh-keyscan -t ed25519 10.0.1.15 > ssh/known_hosts, then check the key
+
+# CI projects NightWatch may read. Provider: github | gitlab | jenkins.
+ci_projects: []
+#  - provider: github
+#    project: your-org/your-repo
+#    role: main build and test pipeline

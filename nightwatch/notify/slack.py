@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from ..audit import Audit
-from ..config import ROOT
+from ..config import data_dir
 
 SEV_EMOJI = {"P0": "🔴", "P1": "🟠", "P2": "🟡"}
 MAX_SECTION = 2900
@@ -101,6 +101,7 @@ def describe_tool_call(tool: str, a: dict, ok: bool | None = None, code: str | N
         "aws_elb_health": lambda: f"Read load balancer target health{result}.",
         "aws_cloudwatch_metric": lambda: f"Read CloudWatch {a.get('namespace')}/{a.get('metric')}{result}.",
         "aws_cloudwatch_alarms": lambda: f"Read CloudWatch alarms{result}.",
+        "aws_ssm_instances": lambda: f"Listed the instances that Systems Manager manages{result}.",
         "aws_cloudwatch_logs": lambda: f"Searched CloudWatch logs {a.get('log_group')}{result}.",
         "aws_cloudtrail_events": lambda: f"Read CloudTrail changes (last {a.get('minutes')} min){result}.",
         "aws_eks_cluster": lambda: f"Read EKS cluster {a.get('cluster')}{result}.",
@@ -326,7 +327,7 @@ class SlackNotifier:
         self.cfg = cfg or {}
         self.audit = audit
         self.client = client
-        self.outbox = outbox or (ROOT / "runs" / "slack-outbox.jsonl")
+        self.outbox = outbox or (data_dir() / "slack-outbox.jsonl")
         self.console = console
 
     @property

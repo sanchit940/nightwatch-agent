@@ -1,0 +1,12 @@
+# Watch mode checks. Deterministic, no model calls while all is healthy. An incident opens after 2 failed rounds.
+http: []
+#  - name: website
+#    url: https://example.com/healthz
+#    max_ms: 2000
+
+aws:
+  regions: []                            # empty = NIGHTWATCH_AWS_REGION
+  cloudwatch_alarms: true                # every alarm in ALARM state
+  load_balancers: true                   # target groups on a load balancer with targets that do not serve traffic
+  interval_s: 120                        # AWS checks run at most every 2 minutes
+  ignore: []                             # alarm or target group names to skip (wildcards), for example "staging-*"

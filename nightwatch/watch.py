@@ -13,7 +13,7 @@ from typing import Callable
 
 import yaml
 
-from .config import ROOT
+from .config import config_file
 from .connectors.base import TOOLS
 
 
@@ -86,8 +86,77 @@ def check_k8s(namespace: str) -> list[Finding]:
     return found
 
 
+def _ignored(name: str, patterns: list[str]) -> bool:
+    import fnmatch
+    return any(fnmatch.fnmatchcase(name, p) for p in patterns)
+
+
+def _mask(text: str) -> str:
+    import os
+    if os.environ.get("NIGHTWATCH_AWS_MASK", "1") == "0":
+        return text
+    from .masking import MASKER
+    return MASKER.mask(text)
+
+
+def check_aws_alarms(region: str | None, ignore: list[str]) -> list[Finding]:
+    """CloudWatch alarms in ALARM state (metric and composite alarms)."""
+    from .connectors.aws import _client
+    cw = _client("cloudwatch", region)
+    found = []
+    for page in cw.get_paginator("describe_alarms").paginate(StateValue="ALARM", AlarmTypes=["MetricAlarm", "CompositeAlarm"]):
+        for al in page.get("MetricAlarms", []) + page.get("CompositeAlarms", []):
+            name = al["AlarmName"]
+            if _ignored(name, ignore):
+                continue
+            metric = f" (metric {al['Namespace']}/{al['MetricName']})" if al.get("MetricName") else ""
+            found.append(Finding(f"aws-alarm:{region}:{name}", _mask(
+                f"AWS CloudWatch alarm {name} in {region} is in ALARM{metric}: {(al.get('StateReason') or '')[:200]}")))
+    return found
+
+
+# Target states that mean "this target does not serve traffic". "unused" counts only when the instance is stopped.
+_BAD_TARGET = {"unhealthy", "unavailable", "unhealthy.draining"}
+
+
+def check_aws_targets(region: str | None, ignore: list[str]) -> list[Finding]:
+    """Load balancer target groups (attached to a load balancer) with targets that do not serve traffic."""
+    from .connectors.aws import _client
+    elb = _client("elbv2", region)
+    found = []
+    for page in elb.get_paginator("describe_target_groups").paginate():
+        for tg in page.get("TargetGroups", []):
+            name = tg["TargetGroupName"]
+            if not tg.get("LoadBalancerArns") or _ignored(name, ignore):
+                continue
+            th = elb.describe_target_health(TargetGroupArn=tg["TargetGroupArn"]).get("TargetHealthDescriptions", [])
+            bad = [t for t in th if t["TargetHealth"]["State"] in _BAD_TARGET
+                   or (t["TargetHealth"]["State"] == "unused" and t["TargetHealth"].get("Reason") == "Target.InvalidState")]
+            if not bad:
+                continue
+            healthy = sum(1 for t in th if t["TargetHealth"]["State"] == "healthy")
+            reasons = sorted({t["TargetHealth"].get("Reason") or t["TargetHealth"]["State"] for t in bad})
+            found.append(Finding(f"aws-targets:{region}:{name}", _mask(
+                f"AWS load balancer target group {name} in {region}: {len(bad)} of {len(th)} targets do not serve traffic "
+                f"({', '.join(reasons)}); healthy targets: {healthy}.")))
+    return found
+
+
+def _every(seconds: float, fn: Callable[[], list[Finding]]) -> Callable[[], list[Finding]]:
+    """Run an expensive check at most once per interval; between runs, repeat its last result."""
+    state = {"t": 0.0, "last": []}
+
+    def wrapped() -> list[Finding]:
+        if time.monotonic() - state["t"] >= seconds:
+            state["last"] = fn()
+            state["t"] = time.monotonic()
+        return state["last"]
+    wrapped.__name__ = getattr(fn, "__name__", "check")
+    return wrapped
+
+
 def load_checks() -> list[Callable[[], list[Finding]]]:
-    cfg = yaml.safe_load((ROOT / "watch.yaml").read_text())
+    cfg = yaml.safe_load(config_file("watch.yaml").read_text()) or {}
     checks: list[Callable[[], list[Finding]]] = []
     for h in cfg.get("http", []):
         checks.append(lambda h=h: check_http(h["name"], h["url"], h.get("source", "agent"), h.get("max_ms", 1500)))
@@ -97,6 +166,17 @@ def load_checks() -> list[Callable[[], list[Finding]]]:
         checks.append(check_alerts)
     for ns in cfg.get("kubernetes_namespaces", []):
         checks.append(lambda ns=ns: check_k8s(ns))
+    aws = cfg.get("aws") or {}
+    if aws:
+        import os
+        regions = aws.get("regions") or [os.environ.get("NIGHTWATCH_AWS_REGION") or "us-east-1"]
+        ignore = [str(x) for x in aws.get("ignore", []) or []]
+        every = float(aws.get("interval_s", 120))   # AWS APIs are slower and rate-limited: not every round
+        for r in regions:
+            if aws.get("cloudwatch_alarms", True):
+                checks.append(_every(every, lambda r=r: check_aws_alarms(r, ignore)))
+            if aws.get("load_balancers", True):
+                checks.append(_every(every, lambda r=r: check_aws_targets(r, ignore)))
     return checks
 
 

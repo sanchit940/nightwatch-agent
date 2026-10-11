@@ -1,0 +1,188 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  NightWatch in your own AWS account: one small EC2 instance with a read-only IAM role. No inbound ports.
+  The LLM key and other secrets come from one SSM SecureString parameter that you create first.
+  Linted with cfn-lint; review it before you deploy.
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+  SubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Description: A subnet with outbound internet access (private subnet with NAT, or public subnet with a public IP).
+  InstanceType:
+    Type: String
+    Default: t4g.small
+    AllowedValues: [t4g.small, t4g.medium, t4g.large]
+  LatestAmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64
+  EnvParameterName:
+    Type: String
+    Default: /nightwatch/env
+    AllowedPattern: "^/[A-Za-z0-9_./-]+$"
+    Description: SSM SecureString parameter with the content of deploy/.env (ANTHROPIC_API_KEY, NIGHTWATCH_APPROVAL_SECRET, Slack tokens).
+  AllowSsmChecks:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: Allow the fixed read-only Linux checks through SSM Run Command, only on instances tagged nightwatch=read.
+  RepoUrl:
+    Type: String
+    Default: https://github.com/sanchit940/nightwatch-agent
+  RepoRef:
+    Type: String
+    Default: main
+    Description: Branch or tag to build.
+
+Conditions:
+  SsmChecks: !Equals [!Ref AllowSsmChecks, "true"]
+
+Resources:
+  Role:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: ec2.amazonaws.com}
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        # Lets you open a shell on the NightWatch instance with Session Manager (no SSH key, no open port).
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        - PolicyName: nightwatch-read-only
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: NightWatchDescribe
+                Effect: Allow
+                Action:
+                  - ec2:DescribeInstances
+                  - ec2:DescribeInstanceStatus
+                  - ec2:DescribeVolumes
+                  - ec2:DescribeVolumeStatus
+                  - ec2:DescribeSecurityGroups
+                  - ec2:DescribeSubnets
+                  - ec2:DescribeRouteTables
+                  - ec2:DescribeNetworkAcls
+                  - ec2:DescribeNatGateways
+                  - ec2:DescribeInternetGateways
+                  - elasticloadbalancing:DescribeLoadBalancers
+                  - elasticloadbalancing:DescribeListeners
+                  - elasticloadbalancing:DescribeTargetGroups
+                  - elasticloadbalancing:DescribeTargetHealth
+                  - cloudwatch:GetMetricData
+                  - cloudwatch:DescribeAlarms
+                  - logs:FilterLogEvents
+                  - cloudtrail:LookupEvents
+                  - eks:DescribeCluster
+                  - eks:ListNodegroups
+                  - eks:DescribeNodegroup
+                  - iam:SimulatePrincipalPolicy
+                  - route53:ListResourceRecordSets
+                  - ssm:DescribeInstanceInformation
+                  - sts:GetCallerIdentity
+                Resource: "*"
+              - Sid: ReadOwnSettings
+                Effect: Allow
+                Action: ssm:GetParameter
+                Resource: !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${EnvParameterName}
+
+  SsmChecksPolicy:
+    Type: AWS::IAM::Policy
+    Condition: SsmChecks
+    Properties:
+      PolicyName: nightwatch-ssm-checks
+      Roles: [!Ref Role]
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: RunOnlyTheShellScriptDocument
+            Effect: Allow
+            Action: ssm:SendCommand
+            Resource: !Sub arn:${AWS::Partition}:ssm:${AWS::Region}::document/AWS-RunShellScript
+          - Sid: OnlyOnInstancesTaggedForNightWatch
+            Effect: Allow
+            Action: ssm:SendCommand
+            Resource: !Sub arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/*
+            Condition:
+              StringEquals:
+                ssm:resourceTag/nightwatch: read
+          - Sid: ReadCommandResults
+            Effect: Allow
+            Action: ssm:GetCommandInvocation
+            Resource: "*"
+
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles: [!Ref Role]
+
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: NightWatch - no inbound access; outbound to Slack, the LLM API and AWS APIs
+      VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        - IpProtocol: "-1"
+          CidrIp: 0.0.0.0/0
+          Description: outbound HTTPS to Slack, the LLM API, AWS APIs; checks inside the VPC
+
+  LaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateData:
+        ImageId: !Ref LatestAmiId
+        InstanceType: !Ref InstanceType
+        IamInstanceProfile: {Arn: !GetAtt InstanceProfile.Arn}
+        SecurityGroupIds: [!Ref SecurityGroup]
+        MetadataOptions:
+          HttpTokens: required
+          HttpPutResponseHopLimit: 2      # the container reaches the instance role through IMDSv2
+        BlockDeviceMappings:
+          - DeviceName: /dev/xvda
+            Ebs: {VolumeSize: 20, VolumeType: gp3, Encrypted: true}
+        UserData:
+          Fn::Base64: !Sub |
+            #!/bin/bash
+            set -euxo pipefail
+            dnf install -y docker git
+            systemctl enable --now docker
+            mkdir -p /opt/nightwatch/config && cd /opt/nightwatch
+            git clone --depth 1 --branch "${RepoRef}" "${RepoUrl}" src
+            docker build -t nightwatch-agent:local src
+            cp -n src/deploy/config/*.yaml config/
+            aws ssm get-parameter --region "${AWS::Region}" --name "${EnvParameterName}" --with-decryption \
+              --query Parameter.Value --output text > env.raw
+            { grep -vE '^(NIGHTWATCH_AWS_CREDENTIALS|NIGHTWATCH_AWS_ACCOUNT|NIGHTWATCH_AWS_PROFILE)=' env.raw || true; } > .env
+            rm -f env.raw
+            printf 'NIGHTWATCH_AWS_CREDENTIALS=role\nNIGHTWATCH_AWS_ACCOUNT=%s\n' "${AWS::AccountId}" >> .env
+            grep -q '^NIGHTWATCH_AWS_REGION=' .env || echo "NIGHTWATCH_AWS_REGION=${AWS::Region}" >> .env
+            chmod 600 .env
+            docker run -d --name nightwatch --restart unless-stopped --env-file .env \
+              -v /opt/nightwatch/config:/config:ro -v nightwatch-data:/data \
+              --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges:true \
+              nightwatch-agent:local
+
+  Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      LaunchTemplate:
+        LaunchTemplateId: !Ref LaunchTemplate
+        Version: !GetAtt LaunchTemplate.LatestVersionNumber
+      SubnetId: !Ref SubnetId
+      Tags:
+        - {Key: Name, Value: nightwatch}
+
+Outputs:
+  InstanceId:
+    Value: !Ref Instance
+  RoleArn:
+    Value: !GetAtt Role.Arn
+  Connect:
+    Description: Open a shell on the NightWatch instance (no SSH)
+    Value: !Sub aws ssm start-session --target ${Instance} --region ${AWS::Region}
+  Logs:
+    Value: sudo docker logs -f nightwatch

@@ -67,12 +67,20 @@ Rules include: the USE method (errors, saturation, utilization) for every resour
 
 ## Connectors
 
-52 read-only tools in 10 connectors: Linux (containers, kind nodes, and servers over SSH with systemd/journald),
+53 read-only tools in 10 connectors: Linux (containers, kind nodes, servers over SSH, and EC2 through SSM, with systemd/journald),
 Docker, Kubernetes, network path, Prometheus, Grafana (alerts, dashboards, annotations), Loki (LogQL across all
 services), neatlogs (AI-agent traces, spans, alert history) and AWS (EC2, EBS, security groups, VPC routes/NACLs/NAT,
-load balancer health, CloudWatch, CloudTrail, EKS, IAM simulation, Route 53, one-call health summary) and CI/CD (Jenkins,
+load balancer health, CloudWatch, CloudTrail, EKS, IAM simulation, Route 53, SSM, one-call health summary) and CI/CD (Jenkins,
 GitHub Actions and GitLab CI behind one interface). Each incident is bound to one environment (lab, aws, ci, ai-agent). Unconfigured connectors are hidden from
 the model. Setup and safety notes: [`docs/connectors.md`](docs/connectors.md).
+
+## Run it in your own cloud
+
+One container in your account, your own LLM key, a read-only AWS role, no inbound ports. It watches CloudWatch alarms
+and load balancer targets, checks Linux servers through SSM or SSH, reads CloudWatch Logs, CloudTrail, Loki and CI,
+and asks in Slack before any change. AWS: one CloudFormation stack ([`deploy/aws/nightwatch.yaml`](deploy/aws/nightwatch.yaml)).
+Any server with Docker: `cd deploy && cp .env.example .env && docker compose up -d --build`.
+Guide: [`docs/self-host.md`](docs/self-host.md).
 
 ## Try it (bring your own key)
 
@@ -164,6 +172,7 @@ Results are in [`evals/results/`](evals/results/).
 | `nightwatch/connectors/` | Linux, Docker, Kubernetes, network, monitoring |
 | `nightwatch/watch.py` | Watch mode |
 | `knowledge/` | Runbooks from *Systems Performance* 2e |
+| `deploy/` | Self-hosting: starter config (read-only policy), docker compose, CloudFormation for AWS |
 | `lab/` | Fault lab (Docker Compose + kind, 12 faults) |
 | `evals/` | Scenarios, harness, results |
 | `hackathon.md` | Build log |

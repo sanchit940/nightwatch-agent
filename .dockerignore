@@ -1,0 +1,11 @@
+# Only the code, the knowledge base and the starter config go into the image. Never secrets or local data.
+*
+!pyproject.toml
+!README.md
+!nightwatch/
+!knowledge/
+!deploy/config/
+**/__pycache__
+**/*.pyc
+**/*.local.yaml
+**/.env

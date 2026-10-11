@@ -7,6 +7,7 @@ Every tool call goes through the policy service (`policy.yaml` → `scope.read_t
 |---|---|---|
 | Linux (containers, kind nodes) | `linux_check`, `linux_use_snapshot`, `linux_service_status` | Nothing (uses `docker exec`) |
 | Linux (servers over SSH) | same tools, target `host:<name>` | `ssh_hosts` in `inventory.yaml` (or `inventory.local.yaml`) |
+| Linux (EC2 through AWS Systems Manager) | same tools, target `ssm:<instance-id>`; no SSH key, no open port | AWS settings below, plus `ssm:SendCommand` limited by [`aws-ssm-checks-policy.json`](aws-ssm-checks-policy.json) (instances tagged `nightwatch=read`) |
 | Docker | `docker_*` | Nothing |
 | Kubernetes | `k8s_*` | `NIGHTWATCH_KUBE_CONTEXT` (default `kind-nightwatch`) |
 | Network | `net_*` | Nothing |
@@ -15,7 +16,7 @@ Every tool call goes through the policy service (`policy.yaml` → `scope.read_t
 | Loki | `loki_query`, `loki_labels` | `LOKI_URL`, or Grafana datasource proxy |
 | neatlogs | `neatlogs_traces`, `neatlogs_trace_spans`, `neatlogs_search`, `neatlogs_alerts` | `NEATLOGS_READ_TOKEN` + `NEATLOGS_PROJECT_ID` |
 | CI/CD (Jenkins, GitHub Actions, GitLab CI) | `ci_runs`, `ci_failure_logs`, `ci_compare_runs`; action `ci_rerun_failed` (approval) | GitHub: `NIGHTWATCH_GITHUB_TOKEN` (optional for public runs; needed for logs). GitLab: `GITLAB_URL`, `GITLAB_TOKEN`. Jenkins: `JENKINS_URL`, `JENKINS_USER`, `JENKINS_TOKEN` |
-| AWS | `aws_health_summary`, `aws_ec2_instances`, `aws_ebs_volumes`, `aws_security_groups`, `aws_vpc_network`, `aws_elb_health`, `aws_cloudwatch_metric`, `aws_cloudwatch_alarms`, `aws_cloudwatch_logs`, `aws_cloudtrail_events`, `aws_eks_cluster`, `aws_iam_simulate`, `aws_route53_records` | `NIGHTWATCH_AWS_PROFILE`, `NIGHTWATCH_AWS_REGION`, optional `NIGHTWATCH_AWS_ACCOUNT` |
+| AWS | `aws_health_summary`, `aws_ec2_instances`, `aws_ebs_volumes`, `aws_security_groups`, `aws_vpc_network`, `aws_elb_health`, `aws_cloudwatch_metric`, `aws_cloudwatch_alarms`, `aws_cloudwatch_logs`, `aws_cloudtrail_events`, `aws_eks_cluster`, `aws_iam_simulate`, `aws_route53_records`, `aws_ssm_instances` | Laptop: `NIGHTWATCH_AWS_PROFILE`. Server: `NIGHTWATCH_AWS_CREDENTIALS=role` (EC2/ECS/EKS role; needs the account pin). `NIGHTWATCH_AWS_REGION`, `NIGHTWATCH_AWS_ACCOUNT` |
 
 ## SSH servers
 

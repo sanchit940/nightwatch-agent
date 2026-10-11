@@ -1,0 +1,78 @@
+# NightWatch policy for your own cloud. Owned by humans. The agent cannot read or change this file through any tool.
+# Starter setting: READ-ONLY. The agent investigates and recommends; it cannot change anything until you add
+# targets to action_targets (and the action to actions.allowed). Every change then still needs an approval.
+# Targets use the form <connector>:<path>, matched with shell-style wildcards.
+version: 1
+
+scope:
+  read_targets:
+    - "aws:*"                   # read-only AWS calls (the role or profile is read-only too: docs/aws-readonly-policy.json)
+    - "linux:ssm:*"             # EC2 instances through AWS Systems Manager: fixed read-only checks
+    - "linux:host:*"            # servers in inventory.yaml ssh_hosts (key-only SSH, known host keys only)
+    - "net:*"                   # DNS, TCP, TLS and HTTP tests from the NightWatch host
+    - "ci:*"                    # Jenkins, GitHub Actions, GitLab CI (read)
+    - "grafana"
+    - "grafana:*"
+    - "loki"
+    - "prometheus"
+  # Targets the agent may PROPOSE changes for. Empty = no changes. Example:
+  #   - "ci:github/your-org/your-repo"      # re-run failed CI jobs, after approval
+  action_targets: []
+  deny_targets: []
+
+limits:
+  max_tool_calls: 40              # per investigation
+  max_wall_seconds: 900           # per investigation
+  max_risk_without_approval: 1    # risk 0 (read) and 1 (bounded tests) run without approval
+  block_risk_at_or_above: 3       # destructive actions are blocked
+  approval_ttl_seconds: 900
+
+actions:
+  # Empty = no change actions. Possible: ci_rerun_failed (and, for Docker/Kubernetes hosts, the lab actions).
+  allowed: []
+
+fix_compatibility:
+  ci_rerun_failed: [config_error, application_bug, build_failure, test_failure, permission_error, image_pull_failure, certificate_error]
+
+auto_approve: []
+
+# Which tools an incident may use. A symptom that names AWS (or a region) gets "aws"; a CI failure gets "ci";
+# a symptom that names no platform (for example a failed URL check) gets default_environment.
+environments:
+  aws: [aws, linux, network, ci, grafana, loki, knowledge]   # add monitoring if you set PROMETHEUS_URL
+  ci: [ci, knowledge]
+default_environment: aws
+
+severity:
+  P0:
+    definition: "The public entry point is down, or all requests fail, or data can be lost now."
+    approval_ttl_seconds: 900
+  P1:
+    definition: "Users are affected: some requests fail, latency is high, or a critical dependency is degraded."
+    approval_ttl_seconds: 1800
+  P2:
+    definition: "No user impact now: one component is unhealthy, redundancy is lost, or a limit is near."
+    approval_ttl_seconds: 3600
+
+# Slack: create the app from slack/manifest.yaml. Channel names or IDs; approvers are Slack member IDs (U...).
+# Empty approver list = any member of the channel can decide.
+slack:
+  channels:
+    P0: "#nightwatch"
+    P1: "#nightwatch"
+    P2: "#nightwatch"
+  mention:
+    P0: "<!channel>"
+    P1: "<!here>"
+    P2: ""
+  approvers:
+    P0: []
+    P1: []
+    P2: []
+  escalation:
+    remind_at_fraction: 0.5
+    max_levels: 2
+    contacts:
+      P0: []
+      P1: []
+      P2: []

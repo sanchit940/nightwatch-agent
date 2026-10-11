@@ -9,6 +9,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
+from .config import config_file  # noqa: E402
+
 V1 = """You are NightWatch, a DevOps agent. Investigate the reported infrastructure problem with the tools,
 find the root cause, and recommend a fix. You cannot change infrastructure directly: use propose_action
 for a fix, and a human approves it. Finish with submit_report."""
@@ -101,12 +103,12 @@ V6_RULES = """
 
 def _severity_text() -> str:
     import yaml
-    sev = (yaml.safe_load((ROOT / "policy.yaml").read_text()) or {}).get("severity") or {}
+    sev = (yaml.safe_load(config_file("policy.yaml").read_text()) or {}).get("severity") or {}
     return "\n".join(f"- {k}: {v.get('definition', '')}" for k, v in sev.items())
 
 
 def system_prompt(version: str) -> str:
-    inventory = (ROOT / "inventory.yaml").read_text()
+    inventory = config_file("inventory.yaml").read_text()
     if version == "v1":
         return V1 + "\n\n# Inventory\n" + inventory
     method = (ROOT / "knowledge" / "methodology.md").read_text()

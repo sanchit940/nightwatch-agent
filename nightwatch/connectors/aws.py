@@ -2,7 +2,8 @@
 health, CloudWatch metrics/alarms/logs, CloudTrail change history, EKS, IAM policy simulation, Route 53.
 
 Safety:
-- Uses ONLY the named profile in NIGHTWATCH_AWS_PROFILE (never the default credential chain).
+- Credentials: the named profile in NIGHTWATCH_AWS_PROFILE (on a laptop), or NIGHTWATCH_AWS_CREDENTIALS=role on a
+  server (the EC2 instance role, ECS task role or EKS service-account role). Role mode requires the account pin.
 - If NIGHTWATCH_AWS_ACCOUNT is set, every session confirms the account ID first and refuses any other account.
 - Every call is a Describe/List/Get/Lookup/Simulate call. The IAM user should have a read-only policy
   (see docs/aws-readonly-policy.json). There are no AWS change actions in v1.
@@ -32,22 +33,35 @@ class AwsError(Exception):
 
 
 @lru_cache(maxsize=8)
-def _session(profile: str, region: str):
+def _session(profile: str | None, region: str):
     import boto3
     s = boto3.Session(profile_name=profile, region_name=region)
     want = os.environ.get("NIGHTWATCH_AWS_ACCOUNT")
     if want:
         got = s.client("sts").get_caller_identity()["Account"]
         if got != want:
-            raise AwsError("WRONG_ACCOUNT", f"profile {profile} is account {got}, expected {want}")
+            raise AwsError("WRONG_ACCOUNT", f"{'profile ' + profile if profile else 'the role'} is account {got}, expected {want}")
     return s
+
+
+def _credentials() -> str | None:
+    """The profile name, or None for the server role. Raises when AWS is not configured safely."""
+    mode = os.environ.get("NIGHTWATCH_AWS_CREDENTIALS", "profile").strip().lower()
+    if mode == "role":
+        if not os.environ.get("NIGHTWATCH_AWS_ACCOUNT"):
+            raise AwsError("NOT_CONFIGURED", "role mode needs the account pin: set NIGHTWATCH_AWS_ACCOUNT to the 12-digit account ID")
+        return None
+    if mode != "profile":
+        raise AwsError("NOT_CONFIGURED", "NIGHTWATCH_AWS_CREDENTIALS must be 'profile' or 'role'")
+    profile = os.environ.get("NIGHTWATCH_AWS_PROFILE")
+    if not profile:
+        raise AwsError("NOT_CONFIGURED", "set NIGHTWATCH_AWS_PROFILE to a read-only profile, or NIGHTWATCH_AWS_CREDENTIALS=role on a server")
+    return profile
 
 
 def _client(service: str, region: str | None):
     from botocore.config import Config
-    profile = os.environ.get("NIGHTWATCH_AWS_PROFILE")
-    if not profile:
-        raise AwsError("NOT_CONFIGURED", "set NIGHTWATCH_AWS_PROFILE to a read-only profile (the default profile is never used)")
+    profile = _credentials()
     region = region or os.environ.get("NIGHTWATCH_AWS_REGION") or "us-east-1"
     cfg = Config(connect_timeout=5, read_timeout=15, retries={"max_attempts": 2, "mode": "standard"},
                  user_agent_extra="nightwatch/0.1")
@@ -524,6 +538,31 @@ def aws_route53_records(a: DnsArgs) -> ToolOutput:
         rr = [r for r in rr if r["Name"].rstrip(".") == name.rstrip(".")]
         return "\n".join(_j({"name": r["Name"], "type": r["Type"], "ttl": r.get("TTL"), "values": [v["Value"] for v in r.get("ResourceRecords", [])],
                              "alias": (r.get("AliasTarget") or {}).get("DNSName"), "policy": r.get("SetIdentifier")}) for r in rr)
+    return _run(go)
+
+
+class SsmArgs(Args):
+    region: REGION = None
+    problems_only: bool = Field(False, description="only instances whose SSM agent is not Online")
+
+
+@tool("aws_ssm_instances",
+      "EC2 instances managed by AWS Systems Manager: SSM agent status (Online/ConnectionLost), last ping, platform, IP. "
+      "Online instances accept the Linux checks as target ssm:<instance-id> (no SSH key needed).",
+      SsmArgs, RiskLevel.READ, "aws", targets=lambda a: [f"aws:{a.region or 'default'}/ssm"])
+def aws_ssm_instances(a: SsmArgs) -> ToolOutput:
+    def go():
+        rows, total = [], 0
+        for page in _client("ssm", a.region).get_paginator("describe_instance_information").paginate():
+            for x in page.get("InstanceInformationList", []):
+                total += 1
+                if a.problems_only and x.get("PingStatus") == "Online":
+                    continue
+                rows.append(_j({"instance": x.get("InstanceId"), "ping": x.get("PingStatus"), "last_ping": _iso(x.get("LastPingDateTime")),
+                                "platform": f"{x.get('PlatformName', '')} {x.get('PlatformVersion', '')}".strip(), "agent": x.get("AgentVersion"),
+                                "ip": x.get("IPAddress"), "name": x.get("ComputerName")}))
+        head = f"{total} managed instance(s); showing {len(rows)}" + (" (problems only)" if a.problems_only else "")
+        return head + ("\n" + "\n".join(rows[:150]) if rows else "") + (f"\n(cut: {len(rows) - 150} more)" if len(rows) > 150 else "")
     return _run(go)
 
 
