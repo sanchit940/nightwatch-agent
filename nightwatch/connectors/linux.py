@@ -185,5 +185,6 @@ def linux_service_status(a: ServiceArgs) -> ToolOutput:
     script = (_HAVE + 'if ! have systemctl; then echo "systemd not available on this target"; exit 0; fi; '
               'systemctl status "$1" --no-pager -n 0 2>&1 | head -20; '
               'echo "== properties"; systemctl show "$1" -p ActiveState,SubState,Result,NRestarts,ExecMainStatus,ExecMainExitTimestamp --no-pager; '
-              'echo "== journal"; journalctl -u "$1" -n "$2" --no-pager -o short-iso 2>&1 | tail -n "$2"')
+              'echo "== recent errors and warnings (newest last)"; journalctl -u "$1" -p warning -n 15 --no-pager -o short-iso 2>&1 | tail -n 15; '
+              'echo "== journal (all priorities, newest last)"; journalctl -u "$1" -n "$2" --no-pager -o short-iso 2>&1 | tail -n "$2"')
     return _exec(a.target, script, args=(a.unit, str(a.lines)))

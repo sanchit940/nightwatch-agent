@@ -230,3 +230,5 @@
 - Data note for AWS: tool output goes to the LLM proxy and to neatlogs. The builder must confirm that the company allows this.
 
 **Outstanding (builder):** AWS read-only user and profile; neatlogs read token and project ID.
+- Live eval with the new connectors (prompt v5, `claude-haiku`, diagnosis mode): `redis-down`, `vm-service-crash`, `vm-disk-full` → root cause, resource and fix decision correct in 3/3. On the VM faults the agent used SSH checks, `linux_service_status`, Loki and Grafana by itself. Cost $0.36 in total.
+- Failure found: `vm-service-crash` needed 30 tool calls (187 s, $0.22). The decisive journal error line was in the middle of 50 lines of `linux_service_status`, and one LogQL query used an invalid `| tail 20`. Fix: `linux_service_status` now shows recent error and warning lines first; the `loki_query` description says that LogQL has no tail/head. Not re-measured yet.
