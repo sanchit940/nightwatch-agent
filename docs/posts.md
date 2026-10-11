@@ -15,7 +15,7 @@ How do you let an agent touch prod at 3am? NightWatch:
 - no shell, only typed tools
 - a deterministic policy gate checks every call
 - approvals are HMAC-signed and bound to action + params + target state + expiry
-- stale, modified, replayed or forged approvals are rejected (17 tests)
+- stale, modified, replayed or forged approvals are rejected (41 tests in total)
 #neatHack
 
 ## Post 3 — first live run, and a bug neatlogs showed
@@ -40,3 +40,13 @@ v1 → v5: correct fix decisions 8/12 → 11/12, ineffective changes 4 → 1, sa
 
 A colleague fixed Redis by hand while NightWatch's approval was waiting. The approval was bound to the old state,
 so the worker refused it (STALE_STATE). The agent re-tested, saw HTTP 200, and reported "resolved" without taking credit. #neatHack
+
+## Post 7 — Slack approvals
+
+NightWatch now asks in Slack: P0/P1/P2, nine short lines (problem, cause, plan, risk, rollback, check).
+Approve, Reject, or "Suggest another fix": your instruction cancels the plan, the agent tests it, and a new plan needs approval again. #neatHack
+
+## Post 8 — the agent blamed the wrong service, so we wrote a rule
+
+In a live test our agent said a job restart on another server "caused" Redis to stop. Both happened at 10:20:44. Nothing else linked them.
+Now every causal link needs proof from a tool result, checked against a human-owned dependency map. Time correlation is not causation. #neatHack
