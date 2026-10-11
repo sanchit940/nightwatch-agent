@@ -105,7 +105,7 @@ REPORT_TOOL = {
     "description": "Submit the final investigation report. Call it once, at the end. Every claim must reference evidence from tool results.",
     "input_schema": {
         "type": "object", "additionalProperties": False,
-        "required": ["summary", "severity", "problem_statement", "evidence", "hypotheses", "root_cause", "known_unknowns", "recommendations"],
+        "required": ["summary", "severity", "problem_statement", "evidence", "hypotheses", "root_cause", "causal_chain", "known_unknowns", "recommendations"],
         "properties": {
             "summary": {"type": "string", "description": "One sentence, max 18 words, ASD-STE100"},
             "severity": {"type": "object", "additionalProperties": False, "required": ["level", "reason"], "properties": {
@@ -129,6 +129,13 @@ REPORT_TOOL = {
                 "description": {"type": "string", "description": "One sentence, max 18 words"},
                 "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
                 "symptoms_not_causes": {"type": "array", "items": {"type": "string"}}}},
+            "causal_chain": {"type": "array", "minItems": 1, "description": (
+                "Links from the root cause to the user-facing symptom, in order. Each link needs an EXACT quote (min 12 "
+                "characters) from a tool result of this incident that shows the link. Two events at the same time are not "
+                "a link. NightWatch rejects a link between components with no dependency unless the quoted line names both."),
+                "items": {"type": "object", "additionalProperties": False, "required": ["cause", "effect", "evidence"], "properties": {
+                    "cause": {"type": "string"}, "effect": {"type": "string"},
+                    "evidence": {"type": "string", "description": "Exact text copied from one tool result line"}}}},
             "known_unknowns": {"type": "array", "items": {"type": "string"}},
             "recommendations": {"type": "array", "items": {"type": "object", "additionalProperties": False, "properties": {
                 "description": {"type": "string"}, "approval_id": {"type": "string"},
@@ -168,6 +175,8 @@ def validate_report(r: dict) -> list[str]:
     sev = r.get("severity")
     if not isinstance(sev, dict) or sev.get("level") not in ("P0", "P1", "P2"):
         errs.append("severity.level must be P0, P1 or P2")
+    if not isinstance(r.get("causal_chain"), list) or not r.get("causal_chain"):
+        errs.append("causal_chain must list at least one link with an exact evidence quote")
     for k in ("evidence", "hypotheses", "recommendations", "known_unknowns"):
         if k in r and not isinstance(r[k], list):
             errs.append(f"{k} must be an array")
@@ -242,6 +251,16 @@ class Agent:
                 return {"type": "tool_result", "tool_use_id": block.id, "is_error": True,
                         "content": "POLICY NOT_A_FIX: propose only an action that removes the root cause or safely restores service. "
                                    "Put manual or follow-up steps in the report recommendations."}
+            from .causality import unsupported_pairs
+            pairs = unsupported_pairs(str(args.get("reason", "")))
+            if pairs:
+                stats.policy_denials += 1
+                self.audit.log("proposal_rejected", {"action": args.get("action"), "reason": "UNSUPPORTED_CAUSAL_CLAIM", "pairs": pairs}, iid)
+                self.on_event("tool_denied", {"tool": "propose_action", "code": "UNSUPPORTED_CAUSAL_CLAIM", "reason": f"{pairs}"})
+                return {"type": "tool_result", "tool_use_id": block.id, "is_error": True,
+                        "content": f"POLICY UNSUPPORTED_CAUSAL_CLAIM: the reason links {pairs[0][0]} and {pairs[0][1]}, which have no "
+                                   "dependency in the inventory. Time correlation is not causation. Remove that claim from the "
+                                   "reason, or prove the link first with a tool result that names both, then propose again."}
             urls = re.findall(r"https?://[^\s'\"<>]+", (self.audit.incident(iid) or {}).get("symptom", ""))
             checks = args.get("verification") or []
             if urls and not any(c.get("tool") in ("net_http_check", "net_trace_path") for c in checks):
@@ -285,7 +304,7 @@ class Agent:
         if not out.ok:
             stats.tool_errors += 1
         self.audit.log("tool_call", {"tool": name, "args": dec.parsed.model_dump(mode="json"), "risk": int(tool.risk), "ok": out.ok,
-                                     "error_code": out.error_code, "ms": ms, "output": out.text[:4000]}, iid)
+                                     "error_code": out.error_code, "ms": ms, "output": out.text[:12000]}, iid)
         self.on_event("tool_call", {"tool": name, "args": dec.parsed.model_dump(mode="json"), "ok": out.ok, "error_code": out.error_code, "ms": ms,
                                     "preview": out.text[:300]})
         header = f"ok={out.ok}" + (f" error_code={out.error_code}" if out.error_code else "") + f" duration_ms={ms}"
@@ -341,6 +360,10 @@ class Agent:
                 for i in report_idx:
                     candidate = dict(uses[i].input)
                     errs = validate_report(candidate)
+                    if not errs:
+                        from .causality import check_chain
+                        outputs = [e["payload"].get("output", "") for e in self.audit.events(iid) if e["kind"] == "tool_call"]
+                        errs = check_chain(candidate.get("causal_chain") or [], outputs)
                     if errs:
                         stats.report_rejections += 1
                         self.audit.log("report_rejected", {"errors": errs}, iid)

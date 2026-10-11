@@ -259,7 +259,9 @@ def details_message(report: dict, audit: Audit, iid: str) -> dict:
     rc = report.get("root_cause") or {}
     symptoms = [ste(x, 1, 12) for x in (rc.get("symptoms_not_causes") or [])[:3]]
     unknown = [ste(x, 1, 15) for x in (report.get("known_unknowns") or [])[:2]]
-    lines = ["*Details*", f"*Checked:* {checked}"] + ([_bullets(unique_failed[:3])] if failed else [])
+    chain = report.get("causal_chain") or []
+    chain_txt = " → ".join([ste(chain[0].get("cause"), 1, 8).rstrip(".")] + [ste(c.get("effect"), 1, 8).rstrip(".") for c in chain[:4]]) if chain else ""
+    lines = ["*Details*", f"*Chain:* {chain_txt}." if chain_txt else "", f"*Checked:* {checked}"] + ([_bullets(unique_failed[:3])] if failed else [])
     if found:
         lines += ["*Found:*", _bullets(found)]
     if symptoms:

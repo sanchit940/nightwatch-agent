@@ -179,6 +179,7 @@ def test_report_validation_rejects_partial_report():
     assert validate_report({"summary": "everything in one string"})
     good = {"summary": "s", "severity": {"level": "P1", "reason": "r"}, "problem_statement": {}, "evidence": [{"tool": "t", "finding": "f"}], "hypotheses": [],
             "root_cause": {"category": "dependency_down", "resource": "nw-redis", "description": "d", "confidence": "high"},
+            "causal_chain": [{"cause": "nw-redis", "effect": "nw-api", "evidence": "redis dns lookup failed"}],
             "known_unknowns": [], "recommendations": []}
     assert validate_report(good) == []
     assert validate_report({**good, "root_cause": {**good["root_cause"], "category": "made_up"}})
