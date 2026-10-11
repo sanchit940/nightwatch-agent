@@ -288,3 +288,12 @@
 - **Result run 1 → run 4:** problems found 3 → 6 of 8, time 146 s → 105 s, cost $0.20 → $0.05, tool calls 33 → 11, model calls 20 → 11, rejected reports 2 → 0. Tests: 42 passed (3 consecutive runs; one earlier flaky failure, probably the 3-second escalation test).
 - **Correction:** neatlogs records tokens and duration per model span; only the trace totals show 0 through the proxy. Docs updated.
 - **Privacy:** resource names are not masked. Some names identify customers of the company. They reached the LLM proxy and the private neatlogs project; they are not in the public repo. Open decision for the builder: mask resource names too.
+
+### 2026-10-11 (night) — CI/CD connector: Jenkins, GitHub Actions, GitLab CI
+
+- **Builder request:** a versatile CI connector so that teams can use Jenkins, GitHub Actions or GitLab.
+- **Completed** (`nightwatch/connectors/ci.py`): one interface, three providers. Tools `ci_runs` (failing since / last good), `ci_failure_logs` (errors first, redacted), `ci_compare_runs` (commits, files, Jenkins parameters; same-commit and trigger hints); action `ci_rerun_failed` (approval; blocked by `fix_compatibility` for test, build and config failures; only for projects in `policy.yaml`). New environment `ci`; new causes `build_failure`, `test_failure`, `flaky_failure`, `ci_infrastructure`. 52 tools.
+- **Tests:** 6 offline provider tests (48 passed, 1 skipped). Live: GitLab.com public project (runs OK; job logs need a token: clear message); GitHub Actions on this repo (new `tests` workflow, passes on push; two manual runs failed in Test and Install; logs read with a read-only token); local Jenkins (`lab/jenkins/`, kind paused for memory).
+- **Agent runs** (v6, `claude-haiku`, environment `ci`, changes denied): first runs found the cause, but the lab names gave it away (`FAULT`, `inject_failure`, `test_ci_lab_fault.py`, "lab fault" in the inventory). Renamed to neutral names and ran again: Jenkins → "registry credential REGISTRY_TOKEN not set for the publish-only profile" (correct); GitHub → the exact line `tax_rate * 0` and its fix (correct). 3 tool calls, 5–7 model calls, 35–52 s, $0.03–0.05 each. No re-run proposed (correct).
+- **Fix from the GitHub run:** the agent called the test "non-deterministic" because the same commit passed on push. `ci_compare_runs` now says when the trigger differs (manual runs can use other inputs).
+- Lab note: the stopped Jenkins container was renamed to `jenkins-lab`, so watch mode (prefix `nw-`) does not report it.

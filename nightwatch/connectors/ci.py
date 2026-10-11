@@ -158,7 +158,7 @@ class GitHub:
     def run(self, project: str, run_id: str) -> dict:
         r = _http("GET", f"{self.api}/repos/{project}/actions/runs/{run_id}", self._h())
         return {"id": str(r["id"]), "status": _norm_status(r.get("conclusion") or r.get("status")), "commit_full": r.get("head_sha"),
-                "updated": r.get("updated_at"), "attempt": r.get("run_attempt"), "params": {}}
+                "updated": r.get("updated_at"), "attempt": r.get("run_attempt"), "params": {}, "trigger": r.get("event")}
 
     def rerun_failed(self, project: str, run_id: str) -> str:
         if not os.environ.get("NIGHTWATCH_GITHUB_TOKEN"):
@@ -407,8 +407,12 @@ def ci_compare_runs(a: CompareArgs) -> ToolOutput:
         if a.provider != "jenkins" and (not good.get("commit_full") or not bad.get("commit_full")):
             raise CIError("NO_COMMIT", "a run has no commit to compare")
         if good.get("commit_full") and good.get("commit_full") == bad.get("commit_full") and a.provider != "jenkins":
-            return json.dumps({"same_commit": good["commit_full"][:10], "note": "Same commit in both runs: the code did not change. "
-                               "Suspect the environment, a dependency, a secret or a flaky test, not the code."})
+            note = "Same commit in both runs: the code did not change. Suspect the environment, a dependency, a secret or a flaky test."
+            if good.get("trigger") and good.get("trigger") != bad.get("trigger"):
+                note = (f"Same commit, but a different trigger: good run '{good['trigger']}', bad run '{bad['trigger']}'. A manual "
+                        "(workflow_dispatch) run can use different inputs, so code that is skipped on push can run. Check the inputs "
+                        "before you call the test flaky.")
+            return json.dumps({"same_commit": good["commit_full"][:10], "note": note})
         d = p.compare(a.project, good, bad)
         if a.provider == "jenkins" and not d.get("commits") and not d.get("parameter_changes"):
             d["note"] = "No commits and no parameter changes between the runs: suspect the agent, a dependency or a flaky test."

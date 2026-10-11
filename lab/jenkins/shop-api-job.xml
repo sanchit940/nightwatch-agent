@@ -1,0 +1,42 @@
+<?xml version='1.1' encoding='UTF-8'?>
+<project>
+  <description>shop-api build and publish</description>
+  <keepDependencies>false</keepDependencies>
+  <properties>
+    <hudson.model.ParametersDefinitionProperty>
+      <parameterDefinitions>
+        <hudson.model.ChoiceParameterDefinition>
+          <name>PROFILE</name>
+          <choices class="java.util.Arrays$ArrayList"><a class="string-array"><string>standard</string><string>tax-v2</string><string>publish-only</string></a></choices>
+        </hudson.model.ChoiceParameterDefinition>
+        <hudson.model.StringParameterDefinition>
+          <name>RELEASE</name>
+          <defaultValue>1.4.2</defaultValue>
+        </hudson.model.StringParameterDefinition>
+      </parameterDefinitions>
+    </hudson.model.ParametersDefinitionProperty>
+  </properties>
+  <scm class="hudson.scm.NullSCM"/>
+  <canRoam>true</canRoam>
+  <builders>
+    <hudson.tasks.Shell>
+      <command>set -e
+echo "Building shop-api release $RELEASE"
+for i in 1 2 3 4 5; do echo "compiling module $i/5 ... ok"; done
+echo "Running 128 unit tests"
+if [ "$PROFILE" = "tax-v2" ]; then
+  echo "tests/test_checkout.py::test_total_with_tax FAILED"
+  echo "AssertionError: checkout total wrong: expected 105.00, got 100.00"
+  echo "ERROR: 1 failed, 127 passed"
+  exit 1
+fi
+if [ "$PROFILE" = "publish-only" ]; then
+  echo "Publishing image registry.local/shop-api:$RELEASE"
+  echo "ERROR: authentication required: registry credentials REGISTRY_TOKEN not set"
+  exit 2
+fi
+echo "128 passed"
+echo "Published registry.local/shop-api:$RELEASE"</command>
+    </hudson.tasks.Shell>
+  </builders>
+</project>

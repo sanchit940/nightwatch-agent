@@ -14,7 +14,8 @@ Every tool call goes through the policy service (`policy.yaml` → `scope.read_t
 | Grafana | `grafana_alerts`, `grafana_dashboards`, `grafana_dashboard_panels`, `grafana_annotations` | `GRAFANA_URL` + `GRAFANA_TOKEN` (or user/password in the lab) |
 | Loki | `loki_query`, `loki_labels` | `LOKI_URL`, or Grafana datasource proxy |
 | neatlogs | `neatlogs_traces`, `neatlogs_trace_spans`, `neatlogs_search`, `neatlogs_alerts` | `NEATLOGS_READ_TOKEN` + `NEATLOGS_PROJECT_ID` |
-| AWS | `aws_ec2_instances`, `aws_ebs_volumes`, `aws_security_groups`, `aws_vpc_network`, `aws_elb_health`, `aws_cloudwatch_metric`, `aws_cloudwatch_alarms`, `aws_cloudwatch_logs`, `aws_cloudtrail_events`, `aws_eks_cluster`, `aws_iam_simulate`, `aws_route53_records` | `NIGHTWATCH_AWS_PROFILE`, `NIGHTWATCH_AWS_REGION`, optional `NIGHTWATCH_AWS_ACCOUNT` |
+| CI/CD (Jenkins, GitHub Actions, GitLab CI) | `ci_runs`, `ci_failure_logs`, `ci_compare_runs`; action `ci_rerun_failed` (approval) | GitHub: `NIGHTWATCH_GITHUB_TOKEN` (optional for public runs; needed for logs). GitLab: `GITLAB_URL`, `GITLAB_TOKEN`. Jenkins: `JENKINS_URL`, `JENKINS_USER`, `JENKINS_TOKEN` |
+| AWS | `aws_health_summary`, `aws_ec2_instances`, `aws_ebs_volumes`, `aws_security_groups`, `aws_vpc_network`, `aws_elb_health`, `aws_cloudwatch_metric`, `aws_cloudwatch_alarms`, `aws_cloudwatch_logs`, `aws_cloudtrail_events`, `aws_eks_cluster`, `aws_iam_simulate`, `aws_route53_records` | `NIGHTWATCH_AWS_PROFILE`, `NIGHTWATCH_AWS_REGION`, optional `NIGHTWATCH_AWS_ACCOUNT` |
 
 ## SSH servers
 
@@ -48,3 +49,17 @@ The SDK ingest key (`NEATLOGS_API_KEY`) can only send traces. Reading needs a se
 2. Copy the token (`nlsa_…`) to `NEATLOGS_READ_TOKEN`.
 3. `NEATLOGS_PROJECT_ID` must be the project **UUID** (8-4-4-4-12). Another project identifier gives `400 VALIDATION_ERROR`.
    Find it with `GET /api/v1/public/projects` and the token.
+
+## CI/CD (Jenkins, GitHub Actions, GitLab CI)
+
+One interface for three providers. The agent passes `provider` (`jenkins`, `github` or `gitlab`) and `project`
+(GitHub `owner/repo`, GitLab `group/project`, Jenkins job path with folders separated by `/`).
+
+- `ci_runs`: recent runs; the first line says "FAILING since run X, last good run Y".
+- `ci_failure_logs`: failed jobs and steps; error lines first, then the end of the log; secrets redacted.
+- `ci_compare_runs`: last good vs first bad run: commits, changed files, Jenkins parameter changes. Same commit → "the code did not change"; a different trigger is named.
+- `ci_rerun_failed` (risk 2): re-runs failed jobs after approval. `policy.yaml` blocks it for causes that a re-run cannot fix (test, build or config failures) and allows it only for listed projects.
+
+Tokens (read): GitHub fine-grained token with `actions:read` (and `actions:write` for re-runs); GitLab `read_api` (`api` for retries);
+Jenkins API token of a user with Job/Read (Job/Build for re-runs). Incidents about CI get only the CI tools (environment `ci`).
+Local Jenkins lab: `bash lab/jenkins/up.sh`.
