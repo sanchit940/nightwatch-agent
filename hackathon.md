@@ -303,3 +303,10 @@
 - **Builder update:** added a Jenkins API token for the company Jenkins (people log in through Okta). Not yet set: `JENKINS_URL`, `JENKINS_USER`. No call to the company Jenkins yet.
 - **Found during review:** the HTTP helper followed redirects with the token. A login proxy that redirects to Okta would receive the token. Fixed: redirects keep the token only on the same host; to another host the request stops with `SSO_REDIRECT` (or `SSO_LOGIN_PAGE` for an HTML login page). Log downloads still follow without the token.
 - `JENKINS_API_TOKEN` is accepted as an alias of `JENKINS_TOKEN`; a token without `JENKINS_USER` gives a clear error. Tests: 50 passed, 1 skipped.
+
+### 2026-10-11 (late night) — Bring your own key: anybody can try it
+
+- **Builder request:** let other people run NightWatch with their own key, and post that they can try it.
+- NightWatch already reads the key from `.env`. Changes: README "Try it (bring your own key)"; default model `claude-sonnet-5-5` for a direct Anthropic key (the old default was a proxy name); a clear message when no key is set; if a model rejects adaptive thinking or effort, NightWatch continues without them (test added).
+- `.claude/settings.json` (local Entire hooks for the build sessions) removed from the repo; the local file stays, so Entire still records checkpoints.
+- **Fresh-clone test** of the public repo: install OK, 51 tests passed (1 skipped), clear no-key message. With only a key in the environment (neatHack proxy as the stand-in), redis-down: cause found (`nw-redis` stopped), fix proposed (`docker start nw-redis`), change denied as asked. 9 tool calls, 43.5 s, $0.07. Not tested: a direct Anthropic key (we have only the proxy key).

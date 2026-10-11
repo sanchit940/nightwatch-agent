@@ -18,6 +18,10 @@ Building NightWatch for #neatHack: an AI on-call agent you can trust while you s
 
 Our agent blamed the wrong service: two events in the same second. Now every causal link needs proof from a tool result, or the report is rejected. It also reads CI now: Jenkins, GitHub Actions, GitLab. Demo: <video link> #neatHack
 
+### Alternative to C — "try it yourself" (bring your own key)
+
+NightWatch runs with your own Anthropic key. Clone it, start the Docker lab, break Redis, and watch it find the cause. It asks you before it changes anything. About 10 minutes to set up, about $0.07 per incident. https://github.com/sanchit940/nightwatch-agent #neatHack
+
 ## Long list (not used)
 
 ## Post 1 — start
