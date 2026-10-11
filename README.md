@@ -62,6 +62,14 @@ Rules include: the USE method (errors, saturation, utilization) for every resour
 - Tool output is wrapped as untrusted data.
 - Every tool call, denial, proposal, approval, execution and verification goes into a hash-chained audit log.
 
+## Connectors
+
+48 read-only tools in 9 connectors: Linux (containers, kind nodes, and servers over SSH with systemd/journald),
+Docker, Kubernetes, network path, Prometheus, Grafana (alerts, dashboards, annotations), Loki (LogQL across all
+services), neatlogs (AI-agent traces, spans, alert history) and AWS (EC2, EBS, security groups, VPC routes/NACLs/NAT,
+load balancer health, CloudWatch, CloudTrail, EKS, IAM simulation, Route 53). Unconfigured connectors are hidden from
+the model. Setup and safety notes: [`docs/connectors.md`](docs/connectors.md).
+
 ## Quick start
 
 Requirements: Docker Desktop, kind, kubectl, Python 3.10–3.13.

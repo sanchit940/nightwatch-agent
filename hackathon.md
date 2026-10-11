@@ -212,3 +212,21 @@
 - Live run (`redis-down`, `claude-haiku`, prompt v5): plan posted to the channel at 11:36:47 (P0, @channel). The approver clicked **Approve** in Slack at 11:42:35. NightWatch executed `start_container nw-redis` at 11:42:36, verified 3/3 checks at 11:42:42, and reported `resolved`. Cost $0.11. Audit chain intact. Approver recorded as `slack:<member ID>`.
 - Known limit: the app uses rotating app-level tokens (`xoxe.xapp-…`). They expire. Before the demo, generate a fresh app-level token.
 - Note: commit `797b569` contains the approver member ID in the public history. The current files do not.
+
+### 2026-10-11 — More connectors
+
+**Builder decision:** build Grafana + Loki, AWS read-only, neatlogs read, and Linux servers over SSH (systemd, journald). AWS: the builder's company account, with a read-only IAM user that the builder creates.
+
+**Completed**
+- Grafana connector: alert rules with state/health/errors, dashboard search, panel queries, annotations.
+- Loki connector: LogQL log search across all services and log-count metrics; label discovery.
+- neatlogs connector (Public API): traces, spans, keyword search, alert history. Needs a read credential; the SDK ingest key returns 401 (tested).
+- AWS connector, 12 read-only tools. Named profile only (never the default profile), optional account pin, least-privilege policy in `docs/aws-readonly-policy.json`. Tested offline with botocore Stubber.
+- Linux over SSH: all 19 checks on `host:<name>`, plus `journal` and `linux_service_status`. Key only, `BatchMode=yes`, `StrictHostKeyChecking=yes`, fixed scripts, unit names passed as arguments.
+- Unconfigured connectors are hidden from the model.
+- Lab: Grafana (dashboard "Shop overview", alert rules ShopHigh5xx, ShopHighLatency, ShopErrorLogs), Loki + Promtail (all containers and the VM journal), VM `nw-vm` (systemd, journald, SSH key login, `shop-worker.service`), faults `vm-service-crash` and `vm-disk-full`. Memory about 1.2 GB in total.
+- Tests that ran: 31 passed (7 new). Live: Grafana alerts and panels, Loki labels and VM journal lines, SSH load/service status/journal on `host:nw-vm` all returned real data.
+- Lab finding: `ShopHighLatency` did not fire under `api-cpu-hog` (p95 levels at about 0.475 s, threshold 0.5 s). Not changed yet.
+- Data note for AWS: tool output goes to the LLM proxy and to neatlogs. The builder must confirm that the company allows this.
+
+**Outstanding (builder):** AWS read-only user and profile; neatlogs read token and project ID.
