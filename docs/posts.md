@@ -56,3 +56,7 @@ Now every causal link needs proof from a tool result, checked against a human-ow
 We pointed NightWatch at a real (read-only, masked) AWS account. Run 1: the trace showed 82% of the time in 20 model calls,
 15 guessed CloudTrail lookups, and tools that cut their output without saying so. The agent missed the biggest outage.
 Four runs later: 6 of 8 problems found, 105 s instead of 146 s, $0.05 instead of $0.20. #neatHack
+
+## Post 10 — CI/CD
+
+NightWatch now reads CI: Jenkins, GitHub Actions and GitLab, one interface. Two hidden CI failures: it found the missing REGISTRY_TOKEN and the exact bad line (tax_rate * 0). 35–52 s, $0.03–0.05 each. No re-run proposed: a re-run cannot fix a bug. #neatHack
