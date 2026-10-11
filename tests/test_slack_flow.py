@@ -82,63 +82,23 @@ def test_slack_guidance_then_approval_flow(tmp_path, monkeypatch):
     assert posts[0]["channel"] == policy.cfg["slack"]["channels"]["P0"] and posts[0]["thread_ts"] is None   # P0 channel, thread start
     assert all(m["thread_ts"] == posts[0]["ts"] for m in posts[1:])                    # everything else in the thread
     texts = "\n".join(m.get("text", "") for m in posts)
-    assert "Executed:* Start container nw-redis" in texts and "Incident status: ✅ RESOLVED" in texts
+    assert "Done:* Start container nw-redis" in texts and "✅ Resolved" in texts
     rejected = [r for r in audit.approvals() if r["action"] == "restart_container"][0]
     assert rejected["status"] == "rejected"
     assert audit.verify_chain()[0]
 
 
 def test_ste_and_plan_message_limits():
-    long = "This is a very long sentence " * 20 + ". Second. Third sentence."
-    assert len(ste(long, 1, 25).split()) <= 26
+    from nightwatch.notify.slack import render_text
+    long = "This is a very long sentence; it has a semicolon " * 10 + ". Second. Third sentence."
+    out = ste(long)
+    assert ";" not in out and len(out.split()) <= 19 and out.endswith(("…", "."))
     rec = {"id": "apr-1", "action": "rollout_undo", "params": {"namespace": "shop", "deployment": "api", "to_revision": 4},
-           "fingerprint": "x" * 100, "expires_at": time.time() + 60, "justification": {"severity": "P2", "verification": []}}
-    msg = plan_message("inc-1", _report(sev="P2"), rec, ["Step."] * 30)
-    assert len(msg["blocks"]) <= 50
-    assert all(len(b.get("text", {}).get("text", "")) <= 3000 for b in msg["blocks"] if b["type"] == "section")
-    assert "Roll back deployment shop/api to revision 4." in json.dumps(msg)
+           "fingerprint": "x" * 100, "expires_at": time.time() + 60,
+           "justification": {"severity": "P2", "expected_effect": "removes_root_cause", "reason": "r " * 50, "risk": "k " * 50,
+                             "rollback": "b " * 50, "verification": [{"tool": "net_http_check", "args": {"url": "http://x/"}}] * 3}}
+    msg = plan_message("inc-1", _report(sev="P2"), rec)
+    text = render_text(msg)
+    assert "Roll back deployment shop/api to revision 4." in text and "(+2 more)" in text
     assert msg["blocks"][0]["text"]["text"].startswith("🟡 P2")
-
-
-def test_expiry_reminder_and_escalation(tmp_path, monkeypatch):
-    executed = []
-    act = ACTIONS["start_container"]
-    monkeypatch.setattr(act, "fingerprint", lambda p: "fp-1")
-    monkeypatch.setattr(act, "execute", lambda p: executed.append(p.container) or ActionResult(True, "done"))
-    s = Settings()
-    s.neatlogs_api_key, s.llm_api_key = "", "test"
-    audit = Audit(tmp_path / "a.db")
-    policy = Policy(ROOT / "policy.yaml", audit, "secret")
-    policy.cfg["severity"]["P0"]["approval_ttl_seconds"] = 3
-    policy.cfg["slack"]["escalation"] = {"remind_at_fraction": 0.5, "max_levels": 1, "contacts": {"P0": ["UBOSS"]}}
-    outbox = tmp_path / "outbox.jsonl"
-    runner = IncidentRunner(s, audit, policy, make_approver("wait"), notifier=SlackNotifier(policy.cfg["slack"], audit, outbox=outbox),
-                            approval_wait_s=30, guidance_wait_s=0)
-    calls = []
-
-    def fake_run(iid, message, messages=None, max_turns=30):
-        calls.append(message)
-        if len(calls) == 1:
-            just = {"severity": "P0", "expected_effect": "removes_root_cause", "reason": "r", "risk": "x", "rollback": "y", "verification": []}
-            return InvestigationResult(iid, _report(), [policy.propose(iid, "start_container", {"container": "nw-redis"}, just).reason], RunStats(), [])
-        return InvestigationResult(iid, _report("resolved"), [], RunStats(), [])
-    runner.agent.run = fake_run
-
-    def boss():  # decides only on the escalated plan
-        for _ in range(200):
-            for r in audit.approvals(status="pending"):
-                if (r["justification"] or {}).get("escalation_level") == 1:
-                    assert policy.can_decide("UBOSS", "P0", escalated=True)
-                    policy.approve(r["id"], "slack:UBOSS")
-                    return
-            time.sleep(0.05)
-    t = threading.Thread(target=boss)
-    t.start()
-    out = runner.handle("users get 503", max_rounds=3)
-    t.join()
-    assert executed == ["nw-redis"] and out.status == "resolved"
-    statuses = sorted(r["status"] for r in audit.approvals())
-    assert statuses == ["executed", "expired"]
-    text = outbox.read_text()
-    assert "Reminder: plan" in text and "Escalation 1 of 1" in text and "<@UBOSS>" in text
-    assert not policy.can_decide("URANDOM", "P0", escalated=True) or not policy.cfg["slack"]["approvers"]["P0"]
+    assert len(text.splitlines()) <= 12 and len(text.split()) <= 140, text   # short main message

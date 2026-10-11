@@ -88,11 +88,11 @@ PROPOSE_TOOL = {
                                 "description": "What this action does to the incident. 'restores_service_temporarily' = a safe mitigation; "
                                                "then also recommend the permanent fix as a manual step. Actions with no effect are rejected."},
             "params": {"type": "object"},
-            "reason": {"type": "string", "description": "Why this fixes the root cause, with evidence references"},
+            "reason": {"type": "string", "description": "One sentence, max 18 words: why this fixes the cause"},
             "expected_impact": {"type": "string"},
-            "risk": {"type": "string", "description": "What can go wrong"},
+            "risk": {"type": "string", "description": "One sentence, max 15 words: what can go wrong"},
             "preconditions": {"type": "array", "items": {"type": "string"}},
-            "rollback": {"type": "string"},
+            "rollback": {"type": "string", "description": "One sentence, max 15 words"},
             "verification": {"type": "array", "items": CHECK_SCHEMA, "minItems": 1,
                              "description": ("Checks that prove the ORIGINAL symptom is gone. Best: repeat the failing request, for example "
                                             "net_http_check with expect {ok: true}. Avoid checks on log lines in short time windows: they age out.")},
@@ -107,18 +107,18 @@ REPORT_TOOL = {
         "type": "object", "additionalProperties": False,
         "required": ["summary", "severity", "problem_statement", "evidence", "hypotheses", "root_cause", "known_unknowns", "recommendations"],
         "properties": {
-            "summary": {"type": "string", "description": "One or two short sentences"},
+            "summary": {"type": "string", "description": "One sentence, max 18 words, ASD-STE100"},
             "severity": {"type": "object", "additionalProperties": False, "required": ["level", "reason"], "properties": {
                 "level": {"type": "string", "enum": ["P0", "P1", "P2"]},
-                "reason": {"type": "string", "description": "One short sentence: the user impact that sets this level"}}},
+                "reason": {"type": "string", "description": "One sentence, max 15 words: the user impact that sets this level"}}},
             "problem_statement": {"type": "object", "additionalProperties": False, "properties": {
-                "symptom": {"type": "string"}, "affected_service": {"type": "string"}, "environment": {"type": "string"},
+                "symptom": {"type": "string", "description": "One sentence, max 15 words"}, "affected_service": {"type": "string"}, "environment": {"type": "string"},
                 "scope": {"type": "string"}, "start_time": {"type": "string"}}},
             "timeline": {"type": "array", "items": {"type": "object", "additionalProperties": False, "properties": {
                 "time": {"type": "string"}, "source": {"type": "string"}, "event": {"type": "string"}}}},
             "evidence": {"type": "array", "items": {"type": "object", "additionalProperties": False,
                                                     "required": ["tool", "finding"], "properties": {
-                "tool": {"type": "string"}, "finding": {"type": "string"}, "interpretation": {"type": "string"}}}},
+                "tool": {"type": "string"}, "finding": {"type": "string", "description": "One sentence, max 18 words"}, "interpretation": {"type": "string"}}}},
             "hypotheses": {"type": "array", "items": {"type": "object", "additionalProperties": False, "properties": {
                 "cause": {"type": "string"}, "status": {"type": "string", "enum": ["supported", "rejected", "open"]},
                 "why": {"type": "string"}}}},
@@ -126,7 +126,7 @@ REPORT_TOOL = {
                            "properties": {
                 "category": {"type": "string", "enum": ROOT_CAUSE_CATEGORIES},
                 "resource": {"type": "string", "description": "The resource at fault, for example nw-redis or deployment/api"},
-                "description": {"type": "string"},
+                "description": {"type": "string", "description": "One sentence, max 18 words"},
                 "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
                 "symptoms_not_causes": {"type": "array", "items": {"type": "string"}}}},
             "known_unknowns": {"type": "array", "items": {"type": "string"}},

@@ -47,8 +47,7 @@ def build_app(bot_token: str, make: Callable[[], tuple[Audit, Policy]], slack_cf
         d = policy.approve(aid, f"slack:{user}")
         iid = rec["incident_id"]
         if d.allowed:
-            notifier.close_buttons(iid, aid, f"✅ Approved by <@{user}> at {_utc()}. NightWatch runs this exact change now.")
-            notifier.post_update(iid, f"✅ <@{user}> approved: {describe_action(rec['action'], rec['params'])}")
+            notifier.close_buttons(iid, aid, f"✅ Approved by <@{user}> at {_utc()}.")
         else:
             notifier.close_buttons(iid, aid, f"⛔ Not approved: `{d.code}`. {d.reason}")
             deny(respond, f"Not approved: {d.code}. {d.reason}")
@@ -66,9 +65,7 @@ def build_app(bot_token: str, make: Callable[[], tuple[Audit, Policy]], slack_cf
             return deny(respond, f"You are not an approver for {sev} incidents.")
         d = policy.reject(aid, f"slack:{user}", "rejected in Slack")
         if d.allowed:
-            notifier.close_buttons(rec["incident_id"], aid, f"❌ Rejected by <@{user}> at {_utc()}. No change was made.")
-            notifier.post_update(rec["incident_id"], f"❌ <@{user}> rejected the plan. No change was made. "
-                                                     "Use *Give instructions* or fix it by hand.")
+            notifier.close_buttons(rec["incident_id"], aid, f"❌ Rejected by <@{user}> at {_utc()}. No change made.")
         else:
             deny(respond, f"Cannot reject: {d.code}. {d.reason}")
 
@@ -114,7 +111,7 @@ def build_app(bot_token: str, make: Callable[[], tuple[Audit, Policy]], slack_cf
         audit.add_guidance(iid, f"slack:{user}", text, aid)
         if aid and (audit.approval(aid) or {}).get("status") == "pending":
             policy.reject(aid, f"slack:{user}", "replaced by an approver instruction")
-            notifier.close_buttons(iid, aid, f"✍️ <@{user}> gave another instruction at {_utc()}. This plan was not executed.")
+            notifier.close_buttons(iid, aid, f"✍️ Cancelled by an instruction from <@{user}> at {_utc()}. Not executed.")
         # The incident runner posts the instruction into the thread when it picks it up (one place for every source).
 
     return app

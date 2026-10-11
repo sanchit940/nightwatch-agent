@@ -25,16 +25,26 @@ MAX_SECTION = 2900
 
 # ---------- ASD-STE100 text helpers ----------
 
-def ste(text: str | None, max_sentences: int = 2, max_words: int = 25) -> str:
-    """Keep a model-written text short: at most N sentences, each at most N words."""
+def ste(text: str | None, max_sentences: int = 1, max_words: int = 18) -> str:
+    """ASD-STE100 style for model text: few short sentences, no semicolons, each sentence ends with a period."""
     if not text:
         return ""
     text = re.sub(r"\s+", " ", str(text)).strip()
-    sentences = re.split(r"(?<=[.!?])\s+(?=[A-Z0-9`\"'(])", text)
+    text = re.sub(r"\s*;\s*", ". ", text)
+    # A plain word after a full stop starts a sentence: capitalize it (names like nw-redis are not plain words).
+    text = re.sub(r"(?<=\. )([a-z]+)(?=[\s.,:])", lambda m: m.group(1).capitalize(), text)
+    text = re.sub(r"\s*—\s*|\s+-\s+", ". ", text)
+    sentences = [x.strip() for x in re.split(r"(?<=[.!?])\s+(?=[A-Z0-9`\"'(])", text) if x.strip()]
     out = []
-    for s in sentences[:max_sentences]:
-        words = s.split(" ")
-        out.append(" ".join(words[:max_words]) + (" …" if len(words) > max_words else ""))
+    for snt in sentences[:max_sentences]:
+        words = snt.split(" ")
+        snt = " ".join(words[:max_words]).rstrip(",:") + (" …" if len(words) > max_words else "")
+        if snt and snt[-1] not in ".!?…":
+            snt += "."
+        first = snt.split(" ", 1)[0]
+        if first.isalpha() and first.islower():   # keep names such as nw-redis, i-0abc, k8s as written
+            snt = snt[0].upper() + snt[1:]
+        out.append(snt)
     return " ".join(out)
 
 
@@ -159,129 +169,144 @@ def steps_from_audit(audit: Audit, iid: str, limit: int = 10, only_new: bool = F
     return out
 
 
-# ---------- Block Kit builders ----------
+# ---------- Block Kit builders (short ASD-STE100 messages) ----------
+
+NOT_DONE_REASON = {
+    "STALE_STATE": "The target changed after the approval.",
+    "STALE_APPROVAL": "The approval expired.",
+    "REPLAY": "This approval was already used.",
+    "MODIFIED_APPROVAL": "The approval record was changed.",
+    "BAD_SIGNATURE": "The approval signature is not valid.",
+    "NOT_APPROVED": "Nobody approved the plan.",
+    "OUT_OF_SCOPE": "The target is outside the allowed scope.",
+    "NOT_ALLOWED": "The policy does not allow this action now.",
+}
+RESULT = {"resolved": "✅ Resolved", "partially_resolved": "⚠️ Partly resolved", "unresolved": "❌ Not resolved",
+          "awaiting_approval": "⏳ Waiting for a decision", "fix_rejected": "❌ Plan rejected. A human must act",
+          "investigated": "🧭 Investigated. No change made"}
+
 
 def _bullets(lines: list[str]) -> str:
     return "\n".join(f"• {l}" for l in lines if l)
-
-
-def _section(title: str, body: str) -> dict:
-    return {"type": "section", "text": {"type": "mrkdwn", "text": f"*{title}*\n{body}"[:MAX_SECTION]}}
 
 
 def _utc(ts: float) -> str:
     return time.strftime("%H:%M UTC", time.gmtime(ts))
 
 
-def incident_overview(report: dict) -> list[dict]:
-    rc = report.get("root_cause") or {}
+def _text(lines: list[str]) -> dict:
+    return {"type": "section", "text": {"type": "mrkdwn", "text": "\n".join(l for l in lines if l)[:MAX_SECTION]}}
+
+
+def _context(text: str) -> dict:
+    return {"type": "context", "elements": [{"type": "mrkdwn", "text": text}]}
+
+
+def _sev(report: dict, rec: dict | None = None) -> str:
+    return (report.get("severity") or {}).get("level") or ((rec or {}).get("justification") or {}).get("severity") or "P1"
+
+
+def _problem(report: dict) -> str:
     ps = report.get("problem_statement") or {}
-    sev = (report.get("severity") or {})
-    blocks = [
-        {"type": "section", "fields": [
-            {"type": "mrkdwn", "text": f"*Severity*\n{sev.get('level', '?')}: {ste(sev.get('reason'), 1)}"},
-            {"type": "mrkdwn", "text": f"*Service*\n{ste(ps.get('affected_service'), 1) or '-'}"},
-            {"type": "mrkdwn", "text": f"*Symptom*\n{ste(ps.get('symptom'), 1) or '-'}"},
-            {"type": "mrkdwn", "text": f"*Started*\n{ps.get('start_time') or '-'}"},
-        ]},
-    ]
-    return blocks
+    return ste(ps.get("symptom") or report.get("summary"), 1, 18)
 
 
-def findings_blocks(report: dict, steps: list[str], title_checked: str = "What I checked") -> list[dict]:
+def _cause(report: dict) -> str:
     rc = report.get("root_cause") or {}
-    blocks = []
-    if steps:
-        blocks.append(_section(title_checked, _bullets(steps)))
-    ev = [ste(e.get("finding"), 1, 18) for e in (report.get("evidence") or [])[:6]]
-    if ev:
-        blocks.append(_section("What I found", _bullets(ev)))
-    cause = (f"`{rc.get('category', '?')}` on *{rc.get('resource', '?')}* (confidence: {rc.get('confidence', '?')}).\n"
-             f"{ste(rc.get('description'), 3)}")
-    blocks.append(_section("Cause", cause))
-    if rc.get("symptoms_not_causes"):
-        blocks.append(_section("Symptoms, not causes", _bullets([ste(s, 1) for s in rc["symptoms_not_causes"][:5]])))
-    return blocks
+    if not rc:
+        return "Not known yet."
+    return f"{ste(rc.get('description'), 1, 18)} (`{rc.get('category', '?')}`, confidence {rc.get('confidence', '?')})"
 
 
-def plan_message(iid: str, report: dict, rec: dict, steps: list[str], mention: str = "", approvers: list[str] | None = None,
-                 in_thread: bool = False) -> dict:
+def plan_message(iid: str, report: dict, rec: dict, mention: str = "", in_thread: bool = False) -> dict:
+    """Main approval message: about 9 short lines. Evidence goes to a Details reply in the thread."""
     j = rec.get("justification") or {}
-    sev = (report.get("severity") or {}).get("level") or j.get("severity") or "P1"
+    sev = _sev(report, rec)
     action_txt = describe_action(rec["action"], rec["params"])
-    title = f"{SEV_EMOJI.get(sev, '⚪')} {sev} · Approval needed · {iid}"
-    blocks: list[dict] = [{"type": "header", "text": {"type": "plain_text", "text": title[:150]}}]
-    lead = f"{mention} " if mention and not in_thread else ""
-    blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": f"{lead}{ste(report.get('summary'), 2)}"}})
-    if not in_thread:
-        blocks += incident_overview(report)
-    blocks += findings_blocks(report, steps, "What I checked" if not in_thread else "New checks since the last message")
-    plan = [f"*{action_txt}*", EFFECT.get(j.get("expected_effect"), ""),
-            f"Why: {ste(j.get('reason'), 2)}", f"Risk: {ste(j.get('risk'), 2)}", f"Rollback: {ste(j.get('rollback'), 2)}"]
-    blocks.append(_section("Plan", "\n".join(l for l in plan if l and not l.endswith(": "))))
-    checks = [describe_check(c) for c in (j.get("verification") or [])[:5]]
-    if checks:
-        blocks.append(_section("After the change, I will verify", _bullets(checks)))
-    unknown = [ste(u, 1) for u in (report.get("known_unknowns") or [])[:4]]
-    if unknown:
-        blocks.append(_section("Not known", _bullets(unknown)))
-    blocks.append({"type": "actions", "block_id": f"decide:{rec['id']}", "elements": [
-        {"type": "button", "action_id": "nw_approve", "style": "primary", "value": rec["id"],
-         "text": {"type": "plain_text", "text": "Approve"},
-         "confirm": {"title": {"type": "plain_text", "text": "Approve this exact change?"},
-                     "text": {"type": "mrkdwn", "text": f"{action_txt}\nThe approval is bound to the current state of the target. "
-                                                         f"It expires at {_utc(rec['expires_at'])}."},
-                     "confirm": {"type": "plain_text", "text": "Approve"}, "deny": {"type": "plain_text", "text": "Cancel"}}},
-        {"type": "button", "action_id": "nw_reject", "style": "danger", "value": rec["id"],
-         "text": {"type": "plain_text", "text": "Reject"}},
-        {"type": "button", "action_id": "nw_suggest", "value": json.dumps({"iid": iid, "aid": rec["id"]}),
-         "text": {"type": "plain_text", "text": "Suggest another fix"}},
-    ]})
-    who = ("Approvers: " + ", ".join(f"<@{u}>" for u in approvers)) if approvers else "Any channel member can decide."
-    blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text":
-        f"Approval `{rec['id']}` · bound to state `{str(rec.get('fingerprint'))[:40]}` · expires {_utc(rec['expires_at'])} · {who}"}]})
+    checks = j.get("verification") or []
+    check_txt = (describe_check(checks[0]) + (f" (+{len(checks) - 1} more)" if len(checks) > 1 else "")) if checks else "-"
+    lines = [mention if mention and not in_thread else "",
+             f"*Problem:* {_problem(report)}" if not in_thread else "",
+             f"*Cause:* {_cause(report)}" if not in_thread else "",
+             f"*Plan:* {action_txt}",
+             f"*Why:* {ste(j.get('reason'), 1, 18)}" if in_thread else "",
+             f"*Effect:* {EFFECT[j['expected_effect']]}" if j.get("expected_effect") in EFFECT else "",
+             f"*Risk:* {ste(j.get('risk'), 1, 15)}",
+             f"*Rollback:* {ste(j.get('rollback'), 1, 15)}",
+             f"*Check after the change:* {check_txt}"]
+    title = f"{SEV_EMOJI.get(sev, '⚪')} {sev} · {'New plan' if in_thread else 'Approval needed'}"
+    blocks = [{"type": "header", "text": {"type": "plain_text", "text": title}}, _text(lines),
+              {"type": "actions", "block_id": f"decide:{rec['id']}", "elements": [
+                  {"type": "button", "action_id": "nw_approve", "style": "primary", "value": rec["id"],
+                   "text": {"type": "plain_text", "text": "Approve"},
+                   "confirm": {"title": {"type": "plain_text", "text": "Approve this change?"},
+                               "text": {"type": "mrkdwn", "text": f"{action_txt}\nThe approval is for the current state only. It expires at {_utc(rec['expires_at'])}."},
+                               "confirm": {"type": "plain_text", "text": "Approve"}, "deny": {"type": "plain_text", "text": "Cancel"}}},
+                  {"type": "button", "action_id": "nw_reject", "style": "danger", "value": rec["id"], "text": {"type": "plain_text", "text": "Reject"}},
+                  {"type": "button", "action_id": "nw_suggest", "value": json.dumps({"iid": iid, "aid": rec["id"]}),
+                   "text": {"type": "plain_text", "text": "Suggest another fix"}}]},
+              _context(f"`{iid}` · plan `{rec['id']}` · expires {_utc(rec['expires_at'])}" + ("" if in_thread else " · details in thread"))]
     return {"text": f"{sev} approval needed: {action_txt}", "blocks": blocks}
 
 
-def report_message(iid: str, report: dict, steps: list[str], needs_human: bool, mention: str = "", in_thread: bool = False) -> dict:
-    sev = (report.get("severity") or {}).get("level", "P1")
-    res = report.get("resolution") or "not_attempted"
-    state = {"resolved": "✅ Resolved", "partially_resolved": "⚠️ Partly resolved", "unresolved": "❌ Not resolved"}.get(res, "🧭 Investigated")
-    title = f"{SEV_EMOJI.get(sev, '⚪')} {sev} · {state if not needs_human else 'A human must act'} · {iid}"
-    blocks: list[dict] = [{"type": "header", "text": {"type": "plain_text", "text": title[:150]}}]
-    lead = f"{mention} " if mention and not in_thread else ""
-    blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": f"{lead}{ste(report.get('summary'), 2)}"}})
-    if not in_thread:
-        blocks += incident_overview(report)
-    blocks += findings_blocks(report, steps, "What I checked" if not in_thread else "New checks since the last message")
-    recs = [f"{'[manual] ' if r.get('type') == 'manual' else ''}{ste(r.get('description'), 2)}"
-            for r in (report.get("recommendations") or [])[:5]]
-    if recs:
-        blocks.append(_section("Next steps", _bullets(recs)))
-    if needs_human:
-        blocks.append({"type": "actions", "block_id": f"instruct:{iid}", "elements": [
-            {"type": "button", "action_id": "nw_instruct", "style": "primary", "value": json.dumps({"iid": iid, "aid": None}),
-             "text": {"type": "plain_text", "text": "Give instructions"}}]})
-        blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text":
-            "No allowed action can fix this safely. Fix it by hand and tell me to verify, or give me an instruction."}]})
-    return {"text": f"{sev} {iid}: {state}", "blocks": blocks}
+def details_message(report: dict, audit: Audit, iid: str) -> dict:
+    """One thread reply with the evidence. Short lists only."""
+    calls = [e["payload"] for e in audit.events(iid) if e["kind"] == "tool_call"]
+    failed = [describe_tool_call(c["tool"], c.get("args") or {}, False, c.get("error_code")) for c in calls if not c.get("ok")]
+    unique_failed = list(dict.fromkeys(failed))
+    checked = f"{len(calls)} checks. {len(calls) - len(failed)} OK. {len(failed)} failed." if failed else f"{len(calls)} checks. All OK."
+    found = [ste(e.get("finding"), 1, 18) for e in (report.get("evidence") or [])[:4]]
+    rc = report.get("root_cause") or {}
+    symptoms = [ste(x, 1, 12) for x in (rc.get("symptoms_not_causes") or [])[:3]]
+    unknown = [ste(x, 1, 15) for x in (report.get("known_unknowns") or [])[:2]]
+    lines = ["*Details*", f"*Checked:* {checked}"] + ([_bullets(unique_failed[:3])] if failed else [])
+    if found:
+        lines += ["*Found:*", _bullets(found)]
+    if symptoms:
+        lines += ["*Symptoms, not causes:*", _bullets(symptoms)]
+    if unknown:
+        lines += ["*Not known:*", _bullets(unknown)]
+    return {"text": "Details", "blocks": [_text(lines)]}
+
+
+def human_needed_message(iid: str, report: dict, mention: str = "", in_thread: bool = False) -> dict:
+    sev = _sev(report)
+    manual = [ste(r.get("description"), 1, 18) for r in (report.get("recommendations") or []) if r.get("type") != "proposed_action"][:2]
+    lines = [mention if mention and not in_thread else "",
+             f"*Problem:* {_problem(report)}",
+             f"*Cause:* {_cause(report)}",
+             "*Plan:* No allowed action can fix this safely.",
+             ("*Next step:*\n" + _bullets(manual)) if manual else ""]
+    blocks = [{"type": "header", "text": {"type": "plain_text", "text": f"{SEV_EMOJI.get(sev, '⚪')} {sev} · A human must act"}}, _text(lines),
+              {"type": "actions", "block_id": f"instruct:{iid}", "elements": [
+                  {"type": "button", "action_id": "nw_instruct", "style": "primary", "value": json.dumps({"iid": iid, "aid": None}),
+                   "text": {"type": "plain_text", "text": "Give instructions"}}]},
+              _context(f"`{iid}` · fix it by hand and tell me to verify, or give an instruction" + ("" if in_thread else " · details in thread"))]
+    return {"text": f"{sev} {iid}: a human must act", "blocks": blocks}
+
+
+def final_message(iid: str, report: dict, status: str) -> dict:
+    follow = [ste(r.get("description"), 1, 15) for r in (report.get("recommendations") or [])
+              if r.get("type") in ("manual", "follow_up")][:2]
+    lines = [f"*{RESULT.get(status, status)}.* {ste(report.get('summary'), 1, 18)}"]
+    if follow:
+        lines += ["*Follow-up:*", _bullets(follow)]
+    return {"text": f"{iid}: {RESULT.get(status, status)}", "blocks": [_text(lines), _context(f"Audit: `nightwatch audit --incident {iid}`")]}
 
 
 def execution_message(action_txt: str, ex: dict) -> dict:
     v = ex.get("verification") or {}
-    lines = []
     if not ex.get("executed"):
-        lines.append(f"⛔ *Not executed:* {action_txt}")
-        lines.append(f"Reason: `{ex.get('code')}`. {ste(ex.get('detail'), 2)}")
-        lines.append("NightWatch made no change.")
-    else:
-        lines.append(f"{'✅' if ex.get('ok') else '❌'} *Executed:* {action_txt} Result: {'OK' if ex.get('ok') else ex.get('code')}.")
-        if v:
-            status = {"resolved": "RESOLVED", "partially_resolved": "PARTLY RESOLVED", "unresolved": "NOT RESOLVED"}.get(v.get("status"), str(v.get("status")).upper())
-            lines.append(f"*Verification: {status}.* {v.get('passed')} of {v.get('total')} checks passed.")
-            for c in (v.get("checks") or [])[:6]:
-                lines.append(f"• {'PASS' if c.get('passed') else 'FAIL'}: {describe_check(c)}")
-    return {"text": "\n".join(lines)[:MAX_SECTION]}
+        reason = NOT_DONE_REASON.get(ex.get("code"), f"Code {ex.get('code')}.")
+        return {"text": f"⛔ *Not done:* {action_txt} {reason} NightWatch made no change."}
+    if not ex.get("ok"):
+        return {"text": f"❌ *Failed:* {action_txt} Error `{ex.get('code')}`. NightWatch checks again."}
+    checks = v.get("checks") or []
+    failed = [c for c in checks if not c.get("passed")]
+    line = f"✅ *Done:* {action_txt} " + (f"Check: {v.get('passed', 0)} of {v.get('total', 0)} passed." if v.get("total") else "No check was defined.")
+    if failed:
+        line += "\n" + _bullets([f"Failed: {describe_check(c)}" for c in failed[:3]])
+    return {"text": line}
 
 
 # ---------- notifier ----------
@@ -336,25 +361,33 @@ class SlackNotifier:
         return ch, ts, True
 
     def post_plan(self, iid: str, report: dict, rec: dict) -> None:
-        sev = (report.get("severity") or {}).get("level") or (rec.get("justification") or {}).get("severity") or "P1"
+        sev = _sev(report, rec)
         existing = self.audit.get_meta(iid, "slack_thread")
-        steps = steps_from_audit(self.audit, iid, only_new=bool(existing))
-        payload = plan_message(iid, report, rec, steps, self._mention(sev), self._approvers(sev), in_thread=bool(existing))
+        payload = plan_message(iid, report, rec, self._mention(sev), in_thread=bool(existing))
         if existing:
             ch, ts = self._send(existing["channel"], payload, existing["ts"])
         else:
             ch, ts, _ = self._thread(iid, sev, payload)
+            self._send(ch, details_message(report, self.audit, iid), ts)
         self.audit.set_meta(iid, f"slack_msg:{rec['id']}", {"channel": ch, "ts": ts, "text": payload["text"], "blocks": payload["blocks"]})
 
-    def post_report(self, iid: str, report: dict, needs_human: bool) -> None:
-        sev = (report.get("severity") or {}).get("level", "P1")
+    def post_human_needed(self, iid: str, report: dict) -> None:
+        sev = _sev(report)
         existing = self.audit.get_meta(iid, "slack_thread")
-        steps = steps_from_audit(self.audit, iid, only_new=bool(existing))
-        payload = report_message(iid, report, steps, needs_human, self._mention(sev), in_thread=bool(existing))
+        payload = human_needed_message(iid, report, self._mention(sev), in_thread=bool(existing))
         if existing:
             self._send(existing["channel"], payload, existing["ts"])
         else:
-            self._thread(iid, sev, payload)
+            ch, ts, _ = self._thread(iid, sev, payload)
+            self._send(ch, details_message(report, self.audit, iid), ts)
+
+    def post_final(self, iid: str, report: dict, status: str) -> None:
+        existing = self.audit.get_meta(iid, "slack_thread")
+        payload = final_message(iid, report, status)
+        if existing:
+            self._send(existing["channel"], payload, existing["ts"])
+        else:   # nothing was posted before (for example resolved without a change): one short message
+            self._thread(iid, _sev(report), payload)
 
     def post_update(self, iid: str, text: str) -> None:
         t = self.audit.get_meta(iid, "slack_thread")

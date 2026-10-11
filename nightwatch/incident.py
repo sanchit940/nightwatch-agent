@@ -87,7 +87,7 @@ class IncidentRunner:
                 frac = float(self.policy.escalation().get("remind_at_fraction", 0.5))
                 if time.time() >= rec["created_at"] + frac * (rec["expires_at"] - rec["created_at"]):
                     reminded = True
-                    self._notify(iid, f"⏰ Reminder: plan `{aid}` waits for a decision. It expires at "
+                    self._notify(iid, f"⏰ Plan `{aid}` waits for a decision. It expires at "
                                       f"{time.strftime('%H:%M UTC', time.gmtime(rec['expires_at']))}. {self._approver_mentions(rec)}")
             if time.time() > rec["expires_at"]:
                 self.audit.update_approval(aid, status="expired")
@@ -115,7 +115,7 @@ class IncidentRunner:
         max_levels = int(self.policy.escalation().get("max_levels", 0))
         if level >= max_levels:
             self.notifier.close_buttons(iid, aid, "⌛ Expired without a decision. No change was made.")
-            self._notify(iid, f"⛔ No decision after {level} escalation(s). No change was made. A human must act. "
+            self._notify(iid, f"⛔ No decision after {level} escalations. No change made. A human must act. "
                               f"{self._approver_mentions(rec, escalated=True)}")
             return None
         act = ACTIONS[rec["action"]]
@@ -129,8 +129,8 @@ class IncidentRunner:
             return None
         self.audit.log("approval_escalated", {"expired": aid, "new": d.reason, "level": level + 1}, iid)
         self.notifier.close_buttons(iid, aid, f"⌛ Expired without a decision. Escalated as plan `{d.reason}`.")
-        self._notify(iid, f"🚨 Escalation {level + 1} of {max_levels}: nobody decided on plan `{aid}` in time. "
-                          f"{self._approver_mentions(rec, escalated=True)} Please decide on the re-issued plan.")
+        self._notify(iid, f"🚨 Escalation {level + 1} of {max_levels}. Nobody decided in time. "
+                          f"{self._approver_mentions(rec, escalated=True)} Decide on the new plan below.")
         self.notifier.post_plan(iid, self._last_report or {}, self.audit.approval(d.reason))
         return d.reason
 
@@ -154,9 +154,9 @@ class IncidentRunner:
             if new:
                 for rec in new:
                     self.notifier.post_plan(iid, report, rec)
-            else:
-                needs_human = report.get("resolution") not in ("resolved",) and self.guidance_wait_s > 0
-                self.notifier.post_report(iid, report, needs_human)
+            elif report.get("resolution") != "resolved" and self.guidance_wait_s > 0:
+                self.notifier.post_human_needed(iid, report)
+            # Resolved, or nothing to decide: the single final message at the end of handle() covers it.
         except Exception as e:  # noqa: BLE001 - a Slack outage must not stop the incident
             self.audit.log("notify_failed", {"error": f"{type(e).__name__}: {e}"}, iid)
 
@@ -174,8 +174,8 @@ class IncidentRunner:
 
     def _instruction_text(self, g: dict, replaced: str | None) -> str:
         quoted = "\n".join(f"> {l}" for l in g["text"].splitlines())
-        rep = f" Plan `{replaced}` was replaced. It was not executed." if replaced else ""
-        return f"✍️ Instruction from {self._who(g['user'])}:\n{quoted}\n{rep} NightWatch tests the instruction now."
+        rep = f"Plan `{replaced}` is cancelled. " if replaced else ""
+        return f"✍️ {self._who(g['user'])}:\n{quoted}\n{rep}NightWatch checks your instruction now."
 
     def _announce_decision(self, iid: str, rec: dict, status: str, guidance: list[dict]) -> None:
         """One place that tells Slack about every decision, whatever its source (Slack button, CLI, policy rule)."""
@@ -186,13 +186,11 @@ class IncidentRunner:
             for g in guidance:
                 self._notify(iid, self._instruction_text(g, rec["id"]))
             if not str(guidance[0]["user"]).startswith("slack:"):
-                self.notifier.close_buttons(iid, rec["id"], f"✍️ Replaced by an instruction from {self._who(guidance[0]['user'])}. Not executed.")
+                self.notifier.close_buttons(iid, rec["id"], f"✍️ Cancelled by an instruction from {self._who(guidance[0]['user'])}. Not executed.")
         elif status == "approved" and not from_slack:
-            self.notifier.close_buttons(iid, rec["id"], f"✅ Approved by {self._who(rec.get('approver'))}. NightWatch runs this exact change now.")
-            self._notify(iid, f"✅ {self._who(rec.get('approver'))} approved the plan.")
+            self.notifier.close_buttons(iid, rec["id"], f"✅ Approved by {self._who(rec.get('approver'))}.")
         elif status == "rejected" and not from_slack:
-            self.notifier.close_buttons(iid, rec["id"], f"❌ Rejected by {self._who(rec.get('approver'))}. No change was made.")
-            self._notify(iid, f"❌ {self._who(rec.get('approver'))} rejected the plan. No change was made.")
+            self.notifier.close_buttons(iid, rec["id"], f"❌ Rejected by {self._who(rec.get('approver'))}. No change made.")
 
     # ----- lifecycle -----
     def handle(self, symptom: str, source: str = "human", dedup_key: str | None = None, max_rounds: int = 3,
@@ -235,7 +233,7 @@ class IncidentRunner:
                         notes.append(f"Approval {aid} is {status}. It was not executed.")
                         if self.notifier:
                             if status != "expired":   # _escalate already reported the expiry
-                                self._notify(iid, f"Approval `{aid}` is {status}. No change was made.")
+                                self._notify(iid, f"Plan `{aid}` is {status}. No change made.")
             elif self.notifier and self.guidance_wait_s > 0 and (out.report or {}).get("resolution") != "resolved":
                 guidance = self._wait_guidance(iid)
                 for g in guidance:
@@ -274,11 +272,11 @@ class IncidentRunner:
             elif any(self.audit.approval(a)["status"] == "pending" for a in res.proposals):
                 out.status = "awaiting_approval"
         self.audit.set_incident(iid, out.status, out.report)
-        label = {"resolved": "✅ RESOLVED", "partially_resolved": "⚠️ PARTLY RESOLVED", "unresolved": "❌ NOT RESOLVED",
-                 "awaiting_approval": "⏳ WAITING FOR APPROVAL", "fix_rejected": "❌ FIX REJECTED: a human must act",
-                 "investigated": "🧭 INVESTIGATED: no change proposed"}.get(out.status, out.status)
-        self._notify(iid, f"*Incident status: {label}.* Rounds: {out.rounds}. Tool calls: {out.stats.tool_calls}. "
-                          f"Audit: `nightwatch audit --incident {iid}`.")
+        if self.notifier:
+            try:
+                self.notifier.post_final(iid, out.report or {"summary": "No complete report."}, out.status)
+            except Exception as e:  # noqa: BLE001
+                self.audit.log("notify_failed", {"error": f"{type(e).__name__}: {e}"}, iid)
         return out
 
 
