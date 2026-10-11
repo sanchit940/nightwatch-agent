@@ -9,6 +9,12 @@ scope:
     - "docker:network/*"
     - "linux:nw-*"
     - "linux:nightwatch-control-plane"
+    - "linux:host:*"            # servers in inventory ssh_hosts (key-only SSH, known host keys only)
+    - "grafana"
+    - "grafana:*"
+    - "loki"
+    - "neatlogs:*"
+    - "aws:*"                   # read-only AWS calls with the NIGHTWATCH_AWS_PROFILE profile
     - "net:*"
     - "k8s:shop/*"
     - "k8s:_cluster/*"

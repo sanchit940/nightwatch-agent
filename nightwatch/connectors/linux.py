@@ -15,8 +15,9 @@ from pydantic import Field
 from ..runner import run
 from .base import Args, RiskLevel, ToolOutput, tool
 
-TARGET = Annotated[str, Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$",
-                               description="Linux target: a container name (for example nw-api) or a kind node container (for example nightwatch-control-plane)")]
+TARGET = Annotated[str, Field(pattern=r"^(host:)?[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$",
+                               description="Linux target: a container name (for example nw-api), a kind node container (nightwatch-control-plane), "
+                                           "or a server reached over SSH as host:<name> from the inventory (for example host:nw-vm)")]
 
 _HAVE = "have() { command -v \"$1\" >/dev/null 2>&1; }; "
 
@@ -83,6 +84,9 @@ CHECKS: dict[str, tuple[str, str]] = {
                    "dmesg 2>&1 | tail -n 80"),
     "systemd": ("Failed systemd units and recent error-priority journal entries (nodes with systemd only).",
                 _HAVE + "if have systemctl; then systemctl --failed --no-pager; journalctl -p err -n 40 --no-pager 2>&1 | tail -n 40; else echo 'systemd not available on this target'; fi"),
+    "journal": ("systemd journal: warning-or-worse entries of the last 30 minutes, all units (servers with journald).",
+                _HAVE + "if have journalctl; then journalctl -p warning --since -30min -n 80 --no-pager -o short-iso 2>&1 | tail -n 80; "
+                "else echo 'journald not available on this target'; fi"),
     "time": ("Current UTC time on the target (compare with the agent clock for clock skew).",
              "date -u +%Y-%m-%dT%H:%M:%SZ; cat /proc/uptime"),
 }
@@ -95,8 +99,42 @@ class LinuxCheckArgs(Args):
     check: CheckName = Field(description="; ".join(f"{k}: {v[0]}" for k, v in CHECKS.items()))
 
 
-def _exec(target: str, script: str, timeout: float = 20) -> ToolOutput:
-    res = run(["docker", "exec", target, "sh", "-c", script], timeout=timeout, max_bytes=14000)
+def _ssh_hosts() -> dict:
+    import yaml
+    from ..config import ROOT
+    inv = yaml.safe_load((ROOT / "inventory.yaml").read_text()) or {}
+    hosts = {h["name"]: h for h in inv.get("ssh_hosts", []) or []}
+    local = ROOT / "inventory.local.yaml"
+    if local.exists():
+        hosts.update({h["name"]: h for h in (yaml.safe_load(local.read_text()) or {}).get("ssh_hosts", []) or []})
+    return hosts
+
+
+def _argv(target: str, script: str, *args: str) -> list[str] | str:
+    """Fixed argv for a container (docker exec) or a server (ssh, key only, known host keys only)."""
+    if not target.startswith("host:"):
+        return ["docker", "exec", target, "sh", "-c", script, "_", *args]
+    import shlex
+    from ..config import ROOT
+    h = _ssh_hosts().get(target[5:])
+    if not h:
+        return f"unknown host {target[5:]}: add it to ssh_hosts in inventory.yaml"
+    path = lambda p: str((ROOT / p).resolve()) if p and not str(p).startswith("/") else str(p)
+    remote = " ".join(shlex.quote(x) for x in ["sh", "-c", script, "_", *args])
+    return ["ssh", "-i", path(h["key_file"]), "-p", str(h.get("port", 22)),
+            "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes", "-o", f"UserKnownHostsFile={path(h['known_hosts'])}",
+            "-o", "ConnectTimeout=5", "-o", "ServerAliveInterval=5", "-o", "LogLevel=ERROR",
+            f"{h['user']}@{h['address']}", remote]
+
+
+def _exec(target: str, script: str, timeout: float = 20, args: tuple[str, ...] = ()) -> ToolOutput:
+    argv = _argv(target, script, *args)
+    if isinstance(argv, str):
+        return ToolOutput(False, argv, "NOT_FOUND")
+    res = run(argv, timeout=timeout, max_bytes=14000)
+    if target.startswith("host:") and res.exit_code == 255:
+        code = "HOST_KEY_UNKNOWN" if "Host key verification failed" in res.stderr else "SSH_FAILED"
+        return ToolOutput(False, f"ssh failed: {res.stderr.strip()[:300]}", code)
     # Do not echo the script back to the model: it is constant and wastes tokens.
     text = f"exit={res.exit_code} duration_ms={res.duration_ms}\n{res.stdout}"
     if res.stderr.strip():
@@ -133,3 +171,19 @@ def linux_use_snapshot(a: SnapshotArgs) -> ToolOutput:
         ok = ok and out.ok
         parts.append(f"### {name}\n{out.text}")
     return ToolOutput(ok, "\n".join(parts)[:16000])
+
+
+class ServiceArgs(Args):
+    target: TARGET
+    unit: str = Field(pattern=r"^[A-Za-z0-9@._-]{1,100}\.(service|timer|socket|mount)$", description="systemd unit, for example shop-worker.service")
+    lines: int = Field(50, ge=5, le=200)
+
+
+@tool("linux_service_status", "Status of one systemd unit (active/failed, restarts, last exit code) and its last journal lines. For servers with systemd.",
+      ServiceArgs, RiskLevel.READ, "linux", timeout_s=25, targets=lambda a: [f"linux:{a.target}"])
+def linux_service_status(a: ServiceArgs) -> ToolOutput:
+    script = (_HAVE + 'if ! have systemctl; then echo "systemd not available on this target"; exit 0; fi; '
+              'systemctl status "$1" --no-pager -n 0 2>&1 | head -20; '
+              'echo "== properties"; systemctl show "$1" -p ActiveState,SubState,Result,NRestarts,ExecMainStatus,ExecMainExitTimestamp --no-pager; '
+              'echo "== journal"; journalctl -u "$1" -n "$2" --no-pager -o short-iso 2>&1 | tail -n "$2"')
+    return _exec(a.target, script, args=(a.unit, str(a.lines)))

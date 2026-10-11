@@ -27,6 +27,14 @@ environments:
         container: nw-prometheus
         role: metrics and alerts for the lab
         endpoint: http://localhost:9090
+      - name: grafana
+        container: nw-grafana
+        role: dashboards and Grafana-managed alerts (tools grafana_*)
+        endpoint: http://localhost:3000
+      - name: loki
+        container: nw-loki
+        role: logs of ALL lab containers and of host nw-vm (tool loki_query; labels container, service, host)
+        endpoint: http://localhost:3100
       - name: loadgen
         container: nw-loadgen
         role: synthetic traffic to web (about 5 requests/second)
@@ -44,3 +52,13 @@ environments:
           - {kind: Deployment, name: redis, port: 6379}
           - {kind: Deployment, name: toolbox, role: probe source for in-cluster network tests}
         services: [api, redis]
+
+# Servers reached over SSH (key only, known host keys only). Use them as linux targets: host:<name>.
+ssh_hosts:
+  - name: nw-vm
+    role: Linux server with systemd and journald; runs shop-worker.service (a background job)
+    address: localhost
+    port: 2222
+    user: nightwatch
+    key_file: lab/vm/keys/id_ed25519
+    known_hosts: lab/vm/keys/known_hosts

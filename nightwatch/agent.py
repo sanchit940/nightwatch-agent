@@ -220,7 +220,8 @@ class Agent:
         client = anthropic.Anthropic(max_retries=4, base_url=settings.llm_base_url or "https://api.anthropic.com", **kw)
         self.client = neatlogs.wrap(client, agent="nightwatch", prompt_version=settings.prompt_version) if neatlogs and settings.neatlogs_api_key else client
         self.system = system_prompt(settings.prompt_version)
-        self.tools = [t.schema() for t in sorted(TOOLS.values(), key=lambda t: t.name)] + [HYPOTHESES_TOOL, PROPOSE_TOOL, REPORT_TOOL]
+        from .connectors import enabled_tools
+        self.tools = [t.schema() for t in sorted(enabled_tools().values(), key=lambda t: t.name)] + [HYPOTHESES_TOOL, PROPOSE_TOOL, REPORT_TOOL]
 
     # ----- one tool call through the policy gate -----
     def _dispatch(self, iid: str, block: Any, budget: Budget, stats: RunStats, proposals: list[str]) -> dict:
