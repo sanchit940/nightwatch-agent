@@ -400,3 +400,30 @@ def aws_route53_records(a: DnsArgs) -> ToolOutput:
         return "\n".join(_j({"name": r["Name"], "type": r["Type"], "ttl": r.get("TTL"), "values": [v["Value"] for v in r.get("ResourceRecords", [])],
                              "alias": (r.get("AliasTarget") or {}).get("DNSName"), "policy": r.get("SetIdentifier")}) for r in rr)
     return _run(go)
+
+
+# ---------- masking: every AWS tool output is pseudonymized; placeholders in inputs are restored ----------
+
+def _wrap_masking() -> None:
+    from ..masking import MASKER
+    from .base import TOOLS
+
+    def wrap(t):
+        fn = t.fn
+
+        def masked(a):
+            if os.environ.get("NIGHTWATCH_AWS_MASK", "1") == "0":
+                return fn(a)
+            real = t.input_model.model_validate(MASKER.unmask(a.model_dump(mode="json")))
+            out = fn(real)
+            out.text = MASKER.mask(out.text)
+            return out
+        t.fn = masked
+
+    for t in TOOLS.values():
+        if t.connector == "aws" and not getattr(t.fn, "_masked", False):
+            wrap(t)
+            t.fn._masked = True
+
+
+_wrap_masking()
