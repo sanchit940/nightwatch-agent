@@ -12,3 +12,4 @@ runs/
 *.egg-info/
 policy.local.yaml
 .claude/
+video-out/
