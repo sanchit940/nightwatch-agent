@@ -325,3 +325,8 @@
 - **Tests:** 62 passed, 1 skipped (11 new). Container tests (read-only, all capabilities dropped): no-key message; AWS watch round on the real account found the known problems (stopped instances, failed health checks, wrong response codes, a timeout); role mode with the right pin works, without a pin or with a wrong pin is refused; `aws_ssm_instances` lists 23 managed instances; SSH from the container to the lab VM works; one full investigation in the container: 15 tool calls, 98 s, $0.07. The CloudFormation template passes `cfn-lint`; it is not deployed (our AWS user is read-only).
 - **Incident in the test:** with the starter policy, the agent tried the new SSM check on one company instance (2 calls). AWS refused both (`AccessDeniedException`): our user has no `ssm:SendCommand`. Nothing ran on the instance. The IAM control worked; the template keeps SSM checks off by default.
 - **Not done:** Azure and GCP API connectors (no account to test; SSH to their VMs works).
+
+### 2026-10-12 — Building in public
+
+- The builder posted the project post on X: https://x.com/Sam07906/status/2109352595227902375 (tags neatlogs, Entire, cfo.ai; #neatHack).
+- Added `lab/demo_ready.sh` (lab reset, healthy twice, Slack token check). The Slack app-level token had expired; the builder makes a new one before recording.
