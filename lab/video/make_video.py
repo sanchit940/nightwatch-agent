@@ -85,9 +85,10 @@ def duration(path: Path) -> float:
 def recording_start(path: Path) -> float:
     """macOS names a screen recording by its start time. Cross-check with the end time (mtime) minus the length."""
     by_end = path.stat().st_mtime - duration(path)
-    m = re.search(r"(\d{4}-\d\d-\d\d) at (\d{1,2})\.(\d\d)\.(\d\d)", path.name)
+    m = re.search(r"(\d{4}-\d\d-\d\d) at (\d{1,2})\.(\d\d)\.(\d\d)\W*(AM|PM)?", path.name)
     if m:
-        by_name = datetime.strptime(f"{m[1]} {m[2]}:{m[3]}:{m[4]}", "%Y-%m-%d %H:%M:%S").timestamp()
+        hour = int(m[2]) % 12 + (12 if m[5] == "PM" else 0) if m[5] else int(m[2])
+        by_name = datetime.strptime(f"{m[1]} {hour}:{m[3]}:{m[4]}", "%Y-%m-%d %H:%M:%S").timestamp()
         if abs(by_name - by_end) < 20:
             return by_name
         print(f"note: file name time and file end time differ by {by_name - by_end:.0f} s; using the end time")
@@ -131,6 +132,32 @@ def docker_kill(since: float, until: float) -> float | None:
                           "--filter", "container=nw-redis", "--filter", "event=kill", "--format", "{{.Time}}"],
                          capture_output=True, text=True, timeout=30).stdout.split()
     return float(out[0]) if out else None
+
+
+# ---------- privacy: blur the Slack sidebar and search bar (workspace name) while Slack is on screen ----------
+
+SLACK_BLUR: list = []   # [((x, y, w, h), [(t0, t1), ...])] in output coordinates and source seconds
+
+
+def slack_ranges(src: Path) -> list[tuple[float, float]]:
+    """Full-screen Slack: grey search bar at the top centre and a near-black workspace rail on the left."""
+    w, h = 250, 156
+    raw = subprocess.run(["ffmpeg", "-v", "error", "-i", str(src), "-vf", f"fps=4,scale={w}:{h}", "-f", "rawvideo",
+                          "-pix_fmt", "gray", "-"], capture_output=True).stdout
+    n = len(raw) // (w * h)
+    hits = []
+    for i in range(n):
+        f = raw[i * w * h:(i + 1) * w * h]
+        bar, rail = f[3 * w + 125], f[75 * w + 6]
+        hits.append(50 <= bar <= 100 and rail < 20)
+    ranges, start = [], None
+    for i, hit in enumerate(hits + [False]):
+        if hit and start is None:
+            start = i
+        if not hit and start is not None:
+            ranges.append((max(0.0, start / 4 - 0.75), i / 4 + 0.75))   # margin for the frames around a switch
+            start = None
+    return ranges
 
 
 # ---------- voice and captions ----------
@@ -233,9 +260,16 @@ def render_scene(src: Path, a: float, b: float, text: str, name: str, height: in
     freeze = max(0.0, target - shown)
     total = shown + freeze
     vf = f"setpts=(PTS-STARTPTS)/{speed:.4f},scale={W}:{height},fps={FPS}"
-    if blur:   # after scaling, so the box is in output coordinates
-        x, y, w, h = (int(v) for v in blur.split(","))
-        vf += f",split[m][c];[c]crop={w}:{h}:{x}:{y},gblur=sigma=14[bl];[m][bl]overlay={x}:{y}"
+    boxes = [(tuple(int(v) for v in blur.split(",")), None)] if blur else []
+    boxes += [(box, ranges) for box, ranges in SLACK_BLUR]
+    for j, ((x, y, w, h), ranges) in enumerate(boxes):   # after scaling: boxes are in output coordinates
+        en = ""
+        if ranges is not None:   # source-time ranges -> this scene's output time
+            parts = [f"between(t,{max(0.0, r0 - a) / speed:.2f},{(r1 - a) / speed:.2f})" for r0, r1 in ranges if r1 > a and r0 < b]
+            if not parts:
+                continue
+            en = ":enable='" + "+".join(parts) + "'"
+        vf += f",split[m{j}][c{j}];[c{j}]crop={w}:{h}:{x}:{y},gblur=sigma=18[bl{j}];[m{j}][bl{j}]overlay={x}:{y}{en}"
     if freeze > 0:
         vf += f",tpad=stop_mode=clone:stop_duration={freeze:.3f}"
     inputs = ["-ss", f"{a:.3f}", "-t", f"{src_dur:.3f}", "-i", str(src), "-i", str(audio)]
@@ -272,6 +306,23 @@ def title_clip(height: int, seconds: float = 3.0) -> Path:
     return out
 
 
+def build_tour(specs: list[str]) -> Path:
+    parts = []
+    for i, spec in enumerate(specs):
+        f, _, rng = spec.rpartition("@")
+        t0, t1 = (float(x) for x in rng.split("-"))
+        out = OUT / "work" / f"tourpart{i}.mp4"
+        sh("ffmpeg", "-y", "-v", "error", "-ss", str(t0), "-t", str(t1 - t0), "-i", str(Path(f).expanduser()), "-an",
+           "-vf", f"fps={FPS},format=yuv420p", "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", str(out))
+        parts.append(out)
+    lst = OUT / "work" / "tour.txt"
+    lst.write_text("".join(f"file '{p}'\n" for p in parts))
+    tour = OUT / "work" / "tour.mp4"
+    sh("ffmpeg", "-y", "-v", "error", "-f", "concat", "-safe", "0", "-i", str(lst), "-c", "copy", str(tour))
+    print(f"tour: {len(parts)} parts, {duration(tour):.1f} s")
+    return tour
+
+
 def concat(parts: list[Path], out: Path) -> None:
     lst = OUT / "work" / f"{out.stem}.txt"
     lst.write_text("".join(f"file '{p}'\n" for p in parts))
@@ -285,8 +336,14 @@ def main() -> int:
     ap.add_argument("--tour", help="optional second recording: neatlogs, results, Entire, cfo.ai, self-host guide (in this order)")
     ap.add_argument("--short", action="store_true", help="also make a short cut for X (under 2 min 20 s)")
     ap.add_argument("--blur", help="x,y,w,h in the output size (1920 wide) to blur, for example a workspace name")
+    ap.add_argument("--tour-part", action="append", default=[], metavar="FILE@START-END",
+                    help="build the tour from parts of recordings (repeat; seconds), for example to leave out private screens")
+    ap.add_argument("--tour-edges", help="comma-separated tour seconds where each voice part starts, plus the end")
+    ap.add_argument("--slack-blur", action="store_true", help="blur the Slack sidebar and search bar while Slack is on screen")
     a = ap.parse_args()
     (OUT / "work").mkdir(parents=True, exist_ok=True)
+    if a.tour_part:
+        a.tour = str(build_tour(a.tour_part))
 
     src = Path(a.incident).expanduser()
     vw, vh = (int(x) for x in sh("ffprobe", "-v", "quiet", "-select_streams", "v:0", "-show_entries", "stream=width,height",
@@ -294,6 +351,10 @@ def main() -> int:
     height = int(W * vh / vw) // 2 * 2
     start = recording_start(src)
     end = start + duration(src)
+    if a.slack_blur:
+        r = slack_ranges(src)
+        SLACK_BLUR[:] = [((0, 0, int(W * 0.276), height), r), ((int(W * 0.286), 0, int(W * 0.417), int(height * 0.045)), r)]
+        print(f"Slack on screen (blurred): {len(r)} ranges, {sum(r1 - r0 for r0, r1 in r):.0f} s")
     marks = incident_marks(start, end)
     names = [n for n, *_ in INCIDENT_SCENES if n in marks]
     bounds = [(n, marks[n] - start, (marks[names[i + 1]] if i + 1 < len(names) else marks["end"]) - start) for i, n in enumerate(names)]
@@ -309,8 +370,14 @@ def main() -> int:
         # Split the tour by the length of each voice part: record it in the same order, at a calm, even pace.
         lens = [voice(text, f"tour{i + 1}")[1] for i, text in enumerate(TOUR_SCENES)]
         edges = [td * sum(lens[:i]) / sum(lens) for i in range(len(lens) + 1)]
+        if a.tour_edges:
+            edges = [float(x) for x in a.tour_edges.split(",")]
+            assert len(edges) == len(TOUR_SCENES) + 1, "tour-edges needs one start per voice part, plus the end"
+        saved_blur = list(SLACK_BLUR)
+        SLACK_BLUR.clear()   # the tour has no Slack
         for i, text in enumerate(TOUR_SCENES):
             parts.append(render_scene(tour, edges[i], edges[i + 1], text, f"tour{i + 1}", height, a.blur, max_speed=3.0))
+        SLACK_BLUR[:] = saved_blur   # the short cut shows the incident (Slack) again
     concat(parts, OUT / "nightwatch-demo.mp4")
 
     if a.short:
